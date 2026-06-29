@@ -89,6 +89,12 @@ export const validate = (rawArgs) => {
     const storeHar = rawArgs.store_har;
     const storeHarBody = rawArgs.store_har_body;
     const compress = rawArgs.compress;
+    const debugStacks = rawArgs.debug_stacks;
+    const debugNative = rawArgs.debug_native;
+    const debugEncoding = rawArgs.debug_encoding;
+    const debugBreakpoints = rawArgs.debug_breakpoint ?? [];
+    const debugMaxCaptures = rawArgs.debug_max_captures;
+    const debugMaxValue = rawArgs.debug_max_value;
     const validatedArgs = {
         executablePath: String(executablePath),
         outputPath,
@@ -109,6 +115,12 @@ export const validate = (rawArgs) => {
         storeHar,
         storeHarBody,
         compress,
+        debugStacks,
+        debugNative,
+        debugEncoding,
+        debugBreakpoints,
+        debugMaxCaptures,
+        debugMaxValue,
     };
     if (rawArgs.proxy_server !== undefined) {
         try {

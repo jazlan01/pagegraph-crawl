@@ -1,6 +1,7 @@
 import assert from 'node:assert'
 import { spawn } from 'node:child_process'
 import { rm, readdir } from 'node:fs/promises'
+import { createServer } from 'node:http'
 import { join } from 'node:path'
 
 import { createTempDir } from '../built/brave/files.js'
@@ -104,6 +105,48 @@ export const startServer = (port = 8080, debug = false) => {
         resolve(serverProcess)
       }
     })
+  })
+}
+
+// The static http-server cannot emit a per-response Set-Cookie header, so we
+// run a tiny built-in node:http listener on a separate port to exercise the
+// server Set-Cookie cookie-set channel. The token below is what tests look
+// for in the resulting graphml.
+export const setCookieName = 'server-cookie'
+export const setCookieValue = 'srvval-91237'
+
+export const startSetCookieServer = (port = 8081, debug = false) => {
+  const server = createServer((req, res) => {
+    if (debug) {
+      console.log(`Set-Cookie server request: ${req.url}`)
+    }
+    res.writeHead(200, {
+      'Content-Type': 'text/html',
+      'Set-Cookie': `${setCookieName}=${setCookieValue}; Path=/`
+    })
+    res.end('<html><body>set-cookie-test</body></html>')
+  })
+
+  return new Promise((resolve) => {
+    server.listen(port, '127.0.0.1', () => {
+      if (debug) {
+        console.log(`Set-Cookie server listening on port ${port}`)
+      }
+      resolve(server)
+    })
+  })
+}
+
+export const stopSetCookieServer = (server) => {
+  if (server === undefined || server === null) {
+    return Promise.resolve()
+  }
+  // Drop any lingering keep-alive sockets so close() resolves promptly.
+  if (typeof server.closeAllConnections === 'function') {
+    server.closeAllConnections()
+  }
+  return new Promise((resolve) => {
+    server.close(() => { resolve() })
   })
 }
 

@@ -10,9 +10,10 @@ import Xvbf from "xvfb";
 
 import { isTopLevelPageNavigation, isTimeoutError } from "./checks.js";
 import { asHTTPUrl } from "./checks.js";
+import { DebugStackTracker } from "./debug_stack_tracker.js";
 import { createScreenshotPath, deleteAtPath } from "./files.js";
 import { writeGraphML } from "./files.js";
-import { writeHAR, writeHeadersLog } from "./files.js";
+import { writeHAR, writeHeadersLog, writeStacks } from "./files.js";
 import { getLogger } from "./logging.js";
 import { makeNavigationTracker } from "./navigation_tracker.js";
 import { selectRandomChildUrl } from "./page.js";
@@ -176,9 +177,16 @@ const generatePageGraph = async (
   client: CDPSessionType,
   waitFunc: () => boolean,
   logger: Logger,
+  stackTracker?: DebugStackTracker,
 ): Promise<FinalPageGraphEvent> => {
   logger.info(`Waiting for ${String(seconds)}s`);
   await waitUntilUnless(seconds, waitFunc);
+
+  // Detach the debugger before generating the graph: a renderer paused at a
+  // breakpoint cannot run Page.generatePageGraph (it times out).
+  if (stackTracker) {
+    await stackTracker.disable();
+  }
 
   logger.info("calling generatePageGraph");
   const response = await client.send("Page.generatePageGraph");
@@ -243,6 +251,19 @@ export const doCrawl = async (
       const page = await browser.newPage();
       const client = await page.target().createCDPSession();
 
+      let stackTracker: DebugStackTracker | undefined;
+      if (args.debugStacks) {
+        stackTracker = new DebugStackTracker(logger, {
+          native: args.debugNative,
+          encoding: args.debugEncoding,
+          breakpoints: args.debugBreakpoints,
+          maxCaptures: args.debugMaxCaptures,
+          maxValue: args.debugMaxValue,
+        });
+        // Enable before navigation so breakpoints exist when scripts parse.
+        await stackTracker.enable(client);
+      }
+
       const networkEvents: NetworkEvent[] = [];
       const pageEvents: PageEvent[] = [];
       const responseBodies = new Map<any, any>();
@@ -276,67 +297,83 @@ export const doCrawl = async (
       await page.setRequestInterception(true);
       // First load is not a navigation redirect, so we need to skip it.
       page.on("request", async (request: HTTPRequestType) => {
-        // We know the given URL will be a valid URL, bc of the puppeteer API
-        const requestedUrl = asHTTPUrl(request.url());
-        assert(requestedUrl);
-        await metadataTracker.addMetadataFromRequest(request);
+        // Never let a request-handler failure become an unhandled rejection:
+        // that crashes the whole crawl (and can truncate output written
+        // concurrently). On any error, best-effort continue and move on.
+        try {
+          // Non-HTTP(S) requests (data:, blob:, chrome-extension:, about:, ...)
+          // aren't navigations and have no HTTP metadata to track; let them
+          // proceed untouched. (asHTTPUrl returns undefined for these.)
+          const requestedUrl = asHTTPUrl(request.url());
+          if (requestedUrl === undefined) {
+            await request.continue();
+            return;
+          }
+          await metadataTracker.addMetadataFromRequest(request);
 
-        // Only capture parent frame navigation requests.
-        if (!isTopLevelPageNavigation(request)) {
-          logger.verbose(
-            "Allowing request to ",
-            request.url(),
-            ", not ",
-            "a top level navigation.",
-          );
-          request.continue();
-          return;
-        }
+          // Only capture parent frame navigation requests.
+          if (!isTopLevelPageNavigation(request)) {
+            logger.verbose(
+              "Allowing request to ",
+              request.url(),
+              ", not ",
+              "a top level navigation.",
+            );
+            await request.continue();
+            return;
+          }
 
-        const hasUrlBeenSeen = navTracker.isInHistory(requestedUrl);
-        const isCurrentNavUrl = navTracker.isCurrentUrl(requestedUrl);
-        if (isCurrentNavUrl) {
-          logger.info(
-            "Loading ",
-            requestedUrl,
-            " bc it is the first top frame page load",
-          );
-          request.continue();
-          return;
-        }
+          const hasUrlBeenSeen = navTracker.isInHistory(requestedUrl);
+          const isCurrentNavUrl = navTracker.isCurrentUrl(requestedUrl);
+          if (isCurrentNavUrl) {
+            logger.info(
+              "Loading ",
+              requestedUrl,
+              " bc it is the first top frame page load",
+            );
+            await request.continue();
+            return;
+          }
 
-        if (!hasUrlBeenSeen) {
-          logger.info(
-            "Detected redirect to ",
-            requestedUrl,
-            " so stopping page load and moving on",
-          );
-          shouldRedirectToUrl = requestedUrl;
+          if (!hasUrlBeenSeen) {
+            logger.info(
+              "Detected redirect to ",
+              requestedUrl,
+              " so stopping page load and moving on",
+            );
+            shouldRedirectToUrl = requestedUrl;
+            shouldStopWaitingFlag = true;
+            const client = await page.createCDPSession();
+            await client.send("Page.stopLoading");
+            await request.continue();
+            return;
+          }
+
+          if (args.crawlDuplicates) {
+            logger.info(
+              "Loading ",
+              requestedUrl,
+              " bc was instructed to crawl duplicates",
+            );
+            await request.continue();
+            return;
+          }
+
+          // Otherwise, we're in a redirect loop, so stop recording
+          // the pagegraph, but continue.
+          logger.info("Quitting bc we're in a redirect loop");
           shouldStopWaitingFlag = true;
           const client = await page.createCDPSession();
           await client.send("Page.stopLoading");
-          request.continue();
-          return;
+          await request.continue();
+        } catch (err) {
+          logger.verbose("Request handler error: ", String(err));
+          try {
+            await request.continue();
+          } catch {
+            // Request was already handled/aborted; nothing more to do.
+          }
         }
-
-        if (args.crawlDuplicates) {
-          logger.info(
-            "Loading ",
-            requestedUrl,
-            " bc was instructed to crawl duplicates",
-          );
-          request.continue();
-          return;
-        }
-
-        // Otherwise, we're in a redirect loop, so stop recording
-        // the pagegraph, but continue.
-        logger.info("Quitting bc we're in a redirect loop");
-        shouldStopWaitingFlag = true;
-        const client = await page.createCDPSession();
-        await client.send("Page.stopLoading");
-        request.continue();
-        return;
       });
 
       page.on("response", async (response: HTTPResponseType) => {
@@ -361,6 +398,7 @@ export const doCrawl = async (
         client,
         shouldStopWaitingFunc,
         logger,
+        stackTracker,
       );
       if (args.saveRequestHeaders) {
         await writeHeadersLog(
@@ -371,6 +409,15 @@ export const doCrawl = async (
         );
       }
       await writeGraphML(args, urlToCrawl, response, metadataTracker, logger);
+
+      if (args.debugStacks && stackTracker) {
+        await writeStacks(
+          args,
+          urlToCrawl,
+          JSON.stringify(stackTracker.getRecords(), null, 2),
+          logger,
+        );
+      }
 
       // Store HAR
       if (args.storeHar) {

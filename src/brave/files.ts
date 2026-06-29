@@ -110,6 +110,28 @@ export const writeHAR = async (
   }
 };
 
+const createStacksPath = (args: CrawlArgs, url: URL): FilePath => {
+  const extension = args.compress ? ".stacks.json.gz" : ".stacks.json";
+  const outputPath = join(createOutputPath(args, url) + extension);
+  return outputPath;
+};
+
+export const writeStacks = async (
+  args: CrawlArgs,
+  url: URL,
+  stacksJSON: string,
+  logger: Logger,
+): Promise<undefined> => {
+  try {
+    const outputFilename = createStacksPath(args, url);
+    logger.info("Writing debug stacks to: ", outputFilename);
+    const data = args.compress ? gzipSync(stacksJSON) : stacksJSON;
+    await writeFile(outputFilename, data);
+  } catch (err) {
+    logger.error("saving debug stacks file: ", String(err));
+  }
+};
+
 export const deleteAtPath = async (path: FilePath): Promise<undefined> => {
   await rm(path, {
     recursive: true,

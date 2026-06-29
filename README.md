@@ -17,7 +17,9 @@ Test
 ```bash
 npm run test
 ```
-The tests are defined in `test/test.js`. Test parameters are defined in `test/config.js` and can be overriden via environment variables. You need to specify a PageGraph binary path.
+The tests are defined in `test/test.js`. Test parameters are read from environment variables (`PAGEGRAPH_CRAWL_TEST_BINARY_PATH`, `PAGEGRAPH_CRAWL_TEST_PORT`, `PAGEGRAPH_CRAWL_TEST_BASE_URL`, `DEBUG`). You need to specify a PageGraph binary path.
+
+The `cookie provenance` suite additionally exercises a small `node:http` listener (on `PAGEGRAPH_CRAWL_TEST_PORT` + 1) that emits a `Set-Cookie` response header, since the static file server cannot. Those tests assert on the PageGraph engine's "cookie source" provenance attribute and require a Brave build that includes the corresponding engine changes.
 
 Usage
 ---

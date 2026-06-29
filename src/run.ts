@@ -124,6 +124,64 @@ parser.add_argument("-z", "--compress", {
   dest: "compress",
   default: false,
 });
+parser.add_argument("--debug-stacks", {
+  help:
+    "Attach the CDP Debugger and capture the JS call stack + local scope " +
+    "values at every document.cookie / CookieStore write, writing them to a " +
+    "<output>.stacks.json sidecar. Useful for auditing how trackers build " +
+    "cookie values.",
+  action: "store_true",
+  dest: "debug_stacks",
+  default: false,
+});
+parser.add_argument("--debug-native", {
+  help:
+    "With --debug-stacks, break on native functions (the document.cookie " +
+    "setter, plus btoa/atob/XHR.send with --debug-encoding). WARNING: halting " +
+    "on a native builtin that is also a PageGraph probe can crash the renderer " +
+    "(SIGTRAP / 'error code 5') on PageGraph builds. Prefer --debug-breakpoint " +
+    "offsets. Off by default.",
+  action: "store_true",
+  dest: "debug_native",
+  default: false,
+});
+parser.add_argument("--debug-encoding", {
+  help:
+    "With --debug-stacks --debug-native, also break on " +
+    "btoa/atob/XMLHttpRequest.send to capture stacks + locals at " +
+    "encoding/exfiltration boundaries.",
+  action: "store_true",
+  dest: "debug_encoding",
+  default: false,
+});
+parser.add_argument("--debug-breakpoint", {
+  help:
+    "With --debug-stacks, set an extra breakpoint at an arbitrary script " +
+    "site and capture the stack + locals there. Repeatable. Format: " +
+    "'<urlRegex>#<byteOffset>' (offset = column on a one-line minified " +
+    "script) or '<urlRegex>@<line>:<col>'.",
+  action: "append",
+  dest: "debug_breakpoint",
+  default: [],
+  metavar: "SPEC",
+});
+parser.add_argument("--debug-max-captures", {
+  help:
+    "With --debug-stacks, cap the total number of paused-stack captures so " +
+    "high-frequency calls (e.g. atob) don't stall the crawl. Default 200.",
+  type: "int",
+  dest: "debug_max_captures",
+  default: 200,
+});
+parser.add_argument("--debug-max-value", {
+  help:
+    "With --debug-stacks, the max captured length of each variable value " +
+    "(object variables are JSON-stringified up to this length). Raise it to " +
+    "capture full payloads/sensor objects. Default 512.",
+  type: "int",
+  dest: "debug_max_value",
+  default: 512,
+});
 // parser.add_argument('--no-stealth', {
 //   help: 'Do not enable the "puppeteer-extra-plugin-stealth" extension.',
 //   default: false,

@@ -97,6 +97,12 @@ export const validate = (rawArgs: any): ValidationResult => {  // eslint-disable
   const storeHar: boolean = rawArgs.store_har;
   const storeHarBody: boolean = rawArgs.store_har_body;
   const compress: boolean = rawArgs.compress;
+  const debugStacks: boolean = rawArgs.debug_stacks;
+  const debugNative: boolean = rawArgs.debug_native;
+  const debugEncoding: boolean = rawArgs.debug_encoding;
+  const debugBreakpoints: string[] = rawArgs.debug_breakpoint ?? [];
+  const debugMaxCaptures: number = rawArgs.debug_max_captures;
+  const debugMaxValue: number = rawArgs.debug_max_value;
   const validatedArgs: CrawlArgs = {
     executablePath: String(executablePath),
     outputPath,
@@ -117,6 +123,12 @@ export const validate = (rawArgs: any): ValidationResult => {  // eslint-disable
     storeHar,
     storeHarBody,
     compress,
+    debugStacks,
+    debugNative,
+    debugEncoding,
+    debugBreakpoints,
+    debugMaxCaptures,
+    debugMaxValue,
   };
 
   if (rawArgs.proxy_server !== undefined) {

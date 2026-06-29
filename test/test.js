@@ -9,19 +9,37 @@ import kill from 'tree-kill'
 
 import {
   startServer, createTempOutputDir, cleanupTempOutputDir,
-  validateHAR, crawlUrl, readCrawlResults, getExpectedFilename
+  validateHAR, crawlUrl, readCrawlResults, getExpectedFilename,
+  startSetCookieServer, stopSetCookieServer, setCookieName, setCookieValue
 } from './utils.js'
 
 const DEBUG = process.env.DEBUG || false
 const testServerPort = process.env.PAGEGRAPH_CRAWL_TEST_PORT || 3000
+// The Set-Cookie listener runs on its own port, since the static http-server
+// cannot emit a per-response Set-Cookie header.
+const setCookieServerPort = Number(testServerPort) + 1
 const baseUrl = process.env.PAGEGRAPH_CRAWL_TEST_BASE_URL || 'http://127.0.0.1'
 const binaryPath = process.env.PAGEGRAPH_CRAWL_TEST_BINARY_PATH || null
 
 const graphMlExtension = '.graphml'
 const testBaseUrl = `${baseUrl}:${testServerPort}`
+const setCookieUrl = `${baseUrl}:${setCookieServerPort}/set-cookie`
 const simpleUrl = `${testBaseUrl}/simple.html`
 const makeTestUrl = (htmlFile) => `${testBaseUrl}/${htmlFile}`
 const expectedFilenameSimple = getExpectedFilename(simpleUrl)
+
+// Schema strings the brave-core PageGraph engine emits into the graphml for
+// cookie provenance. These match the engine changes in
+// brave_page_graph: a "cookie source" edge attribute is added to cookie
+// storage-set edges, tagged per channel by CookieSourceToString().
+const COOKIE_SCHEMA = {
+  // attr.name of the <key> declaring which channel set a cookie.
+  sourceAttr: 'cookie source',
+  // CookieSourceToString() values, by channel.
+  sourceJs: 'js',
+  sourceCookieStore: 'cookie-store',
+  sourceSetCookieHeader: 'set-cookie-header'
+}
 
 const _crawlUrl = async (url, outputDir, args) => {
   return await crawlUrl(url, outputDir, args, binaryPath, DEBUG)
@@ -36,18 +54,22 @@ const _cleanupTempOutputDir = async (outputPath) => {
 
 describe('pagegraph-crawl', () => {
   let serverProcessHandle
+  let setCookieServerHandle
   before(async () => {
     serverProcessHandle = await startServer(testServerPort, DEBUG)
+    setCookieServerHandle = await startSetCookieServer(setCookieServerPort, DEBUG)
   })
   after((done) => {
-    kill(serverProcessHandle.pid, 'SIGTERM', (error) => {
-      if (error) {
-        console.error(error)
-      }
-      if (DEBUG) {
-        console.log('Test server has closed')
-      }
-      done()
+    stopSetCookieServer(setCookieServerHandle).then(() => {
+      kill(serverProcessHandle.pid, 'SIGTERM', (error) => {
+        if (error) {
+          console.error(error)
+        }
+        if (DEBUG) {
+          console.log('Test server has closed')
+        }
+        done()
+      })
     })
   })
 
@@ -377,6 +399,118 @@ describe('pagegraph-crawl', () => {
 
         assert.ok(thirdLogEntry.request.url.endsWith('resources/document.svg'))
         assert.ok(thirdLogEntry.response.content.text.includes('<circle'))
+      } finally {
+        await _cleanupTempOutputDir(testDir)
+      }
+    })
+  })
+
+  // These tests validate the cookie-provenance instrumentation emitted by the
+  // brave-core PageGraph engine (the "cookie source" edge attribute on cookie
+  // storage-set edges). They require a Brave binary built WITH those engine
+  // changes; against a stock binary they will fail, as expected.
+  describe('cookie provenance', () => {
+    it('document.cookie write is tagged source=js', async () => {
+      const testDir = await _createTempOutputDir()
+      try {
+        await _crawlUrl(makeTestUrl('cookie-document.html'), testDir)
+        const files = await _readCrawlResults(testDir)
+        assert.equal(files.length, 1)
+
+        const graphML = await readFile(join(testDir, files[0]), 'UTF-8')
+
+        // The cookie value the page set, recorded exactly once.
+        const cookieWrite = graphML.match(/doc-cookie=docval-[0-9]+/g) || []
+        assert.equal(cookieWrite.length, 1)
+        // Tagged as a JS-driven cookie set.
+        assert.ok(graphML.includes(`attr.name="${COOKIE_SCHEMA.sourceAttr}"`))
+        assert.ok(graphML.includes(`>${COOKIE_SCHEMA.sourceJs}<`))
+      } finally {
+        await _cleanupTempOutputDir(testDir)
+      }
+    })
+
+    it('cookieStore.set write is tagged source=cookie-store', async () => {
+      const testDir = await _createTempOutputDir()
+      try {
+        await _crawlUrl(makeTestUrl('cookie-store.html'), testDir)
+        const files = await _readCrawlResults(testDir)
+        assert.equal(files.length, 1)
+
+        const graphML = await readFile(join(testDir, files[0]), 'UTF-8')
+
+        const cookieWrite = graphML.match(/store-cookie=storeval-[0-9]+/g) || []
+        assert.equal(cookieWrite.length, 1)
+        assert.ok(graphML.includes(`attr.name="${COOKIE_SCHEMA.sourceAttr}"`))
+        assert.ok(graphML.includes(`>${COOKIE_SCHEMA.sourceCookieStore}<`))
+      } finally {
+        await _cleanupTempOutputDir(testDir)
+      }
+    })
+
+    // The Set-Cookie HTTP channel (CookieSource::kHTTP / "set-cookie-header")
+    // is defined in the engine schema but not yet wired to the network-response
+    // path, so this is skipped until that instrumentation lands. The fixture
+    // server (setCookieUrl) is in place so the test can be enabled then.
+    it.skip('Set-Cookie response header is tagged source=set-cookie-header',
+      async () => {
+        const testDir = await _createTempOutputDir()
+        try {
+          await _crawlUrl(setCookieUrl, testDir)
+          const files = await _readCrawlResults(testDir)
+          assert.equal(files.length, 1)
+
+          const graphML = await readFile(join(testDir, files[0]), 'UTF-8')
+
+          assert.ok(graphML.includes(`${setCookieName}=${setCookieValue}`))
+          assert.ok(graphML.includes(`attr.name="${COOKIE_SCHEMA.sourceAttr}"`))
+          assert.ok(graphML.includes(`>${COOKIE_SCHEMA.sourceSetCookieHeader}<`))
+        } finally {
+          await _cleanupTempOutputDir(testDir)
+        }
+      })
+
+    it('crypto/encoding-derived value is set via JS', async () => {
+      const testDir = await _createTempOutputDir()
+      try {
+        await _crawlUrl(makeTestUrl('cookie-derived.html'), testDir)
+        const files = await _readCrawlResults(testDir)
+        assert.equal(files.length, 1)
+
+        const graphML = await readFile(join(testDir, files[0]), 'UTF-8')
+
+        // The digest of a random seed is non-deterministic, so assert on the
+        // cookie name, not the value. The value is written via document.cookie,
+        // so it carries source=js. The data + encoding that produced the value
+        // (TextEncoder.encode -> crypto.subtle.digest -> btoa) are recoverable
+        // from the WebAPI call/result edges PageGraph records for the same
+        // script, ordered by timestamp — i.e. read from the graph, not a
+        // dedicated attribute.
+        assert.ok(graphML.includes('derived-cookie='))
+        assert.ok(graphML.includes(`attr.name="${COOKIE_SCHEMA.sourceAttr}"`))
+        assert.ok(graphML.includes(`>${COOKIE_SCHEMA.sourceJs}<`))
+
+        // The encoding boundary is now instrumented (btoa / TextEncoder added
+        // to the WebAPI tracked-items whitelist), so the graph records those
+        // calls and their results. This is what makes the pre-cipher value
+        // observable for scripts that hand-roll serialization instead of using
+        // JSON.stringify.
+        assert.ok(graphML.includes('btoa'), 'btoa WebAPI call is recorded')
+        assert.ok(
+          graphML.includes('TextEncoder'),
+          'TextEncoder.encode WebAPI call is recorded')
+
+        // Provenance linkage: the exact value written to the cookie is the
+        // output of btoa(), which is now captured as a WebAPI result edge. The
+        // same base64 string therefore appears at least twice — once as the
+        // btoa result, once in the cookie write — proving the value can be
+        // traced back to the encoding boundary without decrypting anything.
+        const derived = graphML.match(/derived-cookie=([A-Za-z0-9+/=]+)/)
+        assert.ok(derived, 'derived-cookie value present')
+        const occurrences = graphML.split(derived[1]).length - 1
+        assert.ok(
+          occurrences >= 2,
+          `derived value linked to btoa result (saw ${occurrences})`)
       } finally {
         await _cleanupTempOutputDir(testDir)
       }

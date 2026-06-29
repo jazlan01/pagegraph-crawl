@@ -4,6 +4,16 @@ Changelog
 HEAD
 ---
 
+Added cookie-provenance test fixtures and a `cookie provenance` test suite
+(`test/test.js`) that validate the brave-core PageGraph engine's new "cookie
+source" edge attribute on cookie storage-set edges, covering the
+`document.cookie` and Cookie Store API channels. The static test server cannot
+emit `Set-Cookie`, so `test/utils.js` now also starts a tiny `node:http`
+listener (on `PAGEGRAPH_CRAWL_TEST_PORT` + 1) for the Set-Cookie channel; the
+matching test is skipped until the engine wires the `set-cookie-header` source.
+These tests require a Brave binary built with the corresponding PageGraph engine
+changes.
+
 Major version bumps for deps and dev-deps.
 
 1.2.12

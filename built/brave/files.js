@@ -80,6 +80,22 @@ export const writeHAR = async (args, url, har, logger) => {
         logger.error("saving HAR file: ", String(err));
     }
 };
+const createStacksPath = (args, url) => {
+    const extension = args.compress ? ".stacks.json.gz" : ".stacks.json";
+    const outputPath = join(createOutputPath(args, url) + extension);
+    return outputPath;
+};
+export const writeStacks = async (args, url, stacksJSON, logger) => {
+    try {
+        const outputFilename = createStacksPath(args, url);
+        logger.info("Writing debug stacks to: ", outputFilename);
+        const data = args.compress ? gzipSync(stacksJSON) : stacksJSON;
+        await writeFile(outputFilename, data);
+    }
+    catch (err) {
+        logger.error("saving debug stacks file: ", String(err));
+    }
+};
 export const deleteAtPath = async (path) => {
     await rm(path, {
         recursive: true,

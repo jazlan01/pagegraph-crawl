@@ -4,3 +4,6 @@ node_modules/
 .vscode/
 test/debug_output/
 test/output/
+# crawl artifacts and captured real-site dumps (large / may contain private data)
+output/
+analysis/runs/

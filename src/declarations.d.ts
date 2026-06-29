@@ -30,6 +30,12 @@ interface CrawlArgs {
   storeHarBody: boolean;
   compress: boolean;
   saveRequestHeaders: boolean;
+  debugStacks: boolean;
+  debugNative: boolean;
+  debugEncoding: boolean;
+  debugBreakpoints: string[];
+  debugMaxCaptures: number;
+  debugMaxValue: number;
 }
 
 type ValidationResult = [boolean, CrawlArgs | ErrorMsg];
