@@ -1,3 +1,5 @@
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
 // Capping a few hot dimensions keeps the sidecar (and the crawl) bounded.
 // Without these, a single capture can run to megabytes: an obfuscated bundle's
 // "closure"/"script" scope can enumerate the entire module (1000+ vars, many of
@@ -70,6 +72,10 @@ export class DebugStackTracker {
     #armedContexts = new Set();
     #offsetBreakpoints = [];
     #armedOffsetKeys = new Set();
+    // URL regexes from every breakpoint spec, used to decide which loaded scripts
+    // to dump (see saveScriptsDir); and the set of URLs already written.
+    #breakpointUrlRegexes = [];
+    #savedScriptUrls = new Set();
     #capping = false;
     constructor(logger, opts) {
         this.#logger = logger;
@@ -92,6 +98,9 @@ export class DebugStackTracker {
             // Offset breakpoints can only be placed once we can read the source to
             // convert offset -> (line, column), which is when the script parses.
             void this.#armOffsetsForScript(event);
+            // Dump the loaded source of breakpoint-targeted scripts so coordinates
+            // can be verified against the exact bytes the renderer ran.
+            void this.#maybeSaveScript(event);
         });
         // Native-function breakpoints are opt-in: halting on a native builtin that
         // is also a PageGraph probe can crash the renderer (SIGTRAP) on this build.
@@ -199,6 +208,12 @@ export class DebugStackTracker {
         const atIdx = spec.lastIndexOf("@");
         if (atIdx !== -1 && atIdx > hashIdx) {
             const urlRegex = spec.slice(0, atIdx);
+            try {
+                this.#breakpointUrlRegexes.push(new RegExp(urlRegex));
+            }
+            catch {
+                /* invalid regex is reported below by setBreakpointByUrl */
+            }
             const parts = spec.slice(atIdx + 1).split(":");
             const lineNumber = Number(parts[0]);
             const columnNumber = Number(parts[1] ?? "0");
@@ -228,10 +243,12 @@ export class DebugStackTracker {
                 return;
             }
             try {
+                const regex = new RegExp(urlRegex);
+                this.#breakpointUrlRegexes.push(regex);
                 this.#offsetBreakpoints.push({
                     spec,
                     label: `bp:${spec}`,
-                    regex: new RegExp(urlRegex),
+                    regex,
                     offset,
                 });
                 this.#log("registerSpec", `deferred ${spec} until matching script parses`);
@@ -276,6 +293,36 @@ export class DebugStackTracker {
             }
         }
     }
+    // Write the loaded source of a script whose URL matches any breakpoint regex,
+    // once per URL, into saveScriptsDir. The saved bytes are authoritative for
+    // computing line:col — a separate fetch of the same URL can differ.
+    async #maybeSaveScript(event) {
+        const client = this.#client;
+        const dir = this.#opts.saveScriptsDir;
+        if (!client || dir === undefined || event.url === "") {
+            return;
+        }
+        if (!this.#breakpointUrlRegexes.some((re) => re.test(event.url))) {
+            return;
+        }
+        if (this.#savedScriptUrls.has(event.url)) {
+            return;
+        }
+        this.#savedScriptUrls.add(event.url);
+        try {
+            const src = (await client.send("Debugger.getScriptSource", {
+                scriptId: event.scriptId,
+            }));
+            const safe = event.url.replace(/[^A-Za-z0-9._-]/g, "_").slice(-150);
+            const outPath = join(dir, `script_${safe}.loaded.js`);
+            writeFileSync(outPath, src.scriptSource);
+            this.#log("maybeSaveScript", `wrote loaded source of ${event.url} -> ${outPath}`);
+        }
+        catch (err) {
+            this.#savedScriptUrls.delete(event.url);
+            this.#log("maybeSaveScript", `failed ${event.url}: ${String(err)}`);
+        }
+    }
     async #onPaused(event) {
         const client = this.#client;
         if (!client) {
@@ -290,7 +337,9 @@ export class DebugStackTracker {
                     this.#capping = true;
                     this.#log("onPaused", `reached max captures (${String(this.#opts.maxCaptures)}); deactivating breakpoints`);
                     try {
-                        await client.send("Debugger.setBreakpointsActive", { active: false });
+                        await client.send("Debugger.setBreakpointsActive", {
+                            active: false,
+                        });
                     }
                     catch {
                         // best effort
@@ -489,9 +538,7 @@ export class DebugStackTracker {
         }
         else if (obj.value !== undefined) {
             str =
-                typeof obj.value === "string"
-                    ? obj.value
-                    : JSON.stringify(obj.value);
+                typeof obj.value === "string" ? obj.value : JSON.stringify(obj.value);
         }
         else {
             str = obj.description ?? obj.type;

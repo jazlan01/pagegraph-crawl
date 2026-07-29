@@ -69,6 +69,11 @@ export class PageGraphXMLRewriter {
             }
         }
     }
+    // The graphml `<data key="...">` id for an edge attribute name, or undefined
+    // if the graph never declared it. Used to build synthesized edges by hand.
+    getEdgeAttrId(attrName) {
+        return this.#edgeAttrIds.get(attrName);
+    }
     getAttrs(elm, ...attrNames) {
         const attrMap = this.#attrMapForElm(elm);
         const attrValues = {};
@@ -116,7 +121,9 @@ export class PageGraphXMLRewriter {
     #makeEditingFunc(func) {
         return (elm) => func(elm, this);
     }
-    async rewriteTo(input, output) {
+    // The streaming editor Transform on its own, so callers can splice extra
+    // stages (e.g. an edge-synthesizing injector) into the pipeline.
+    createTransform() {
         const editRules = {
             [attrElmsSelector]: this.#makeCollectAttrIdsFunc(),
         };
@@ -126,6 +133,9 @@ export class PageGraphXMLRewriter {
         if (this.#nodeEditFunc !== undefined) {
             editRules[nodeElmsSelector] = this.#makeEditingFunc(this.#nodeEditFunc);
         }
-        await pipeline(input, createXMLEditor(editRules), output);
+        return createXMLEditor(editRules);
+    }
+    async rewriteTo(input, output) {
+        await pipeline(input, this.createTransform(), output);
     }
 }

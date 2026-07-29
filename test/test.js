@@ -1,6 +1,7 @@
 /* global describe, before, after, it */
 
 import assert from 'node:assert'
+import { execFileSync } from 'node:child_process'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { gunzipSync } from 'node:zlib'
@@ -448,11 +449,12 @@ describe('pagegraph-crawl', () => {
       }
     })
 
-    // The Set-Cookie HTTP channel (CookieSource::kHTTP / "set-cookie-header")
-    // is defined in the engine schema but not yet wired to the network-response
-    // path, so this is skipped until that instrumentation lands. The fixture
-    // server (setCookieUrl) is in place so the test can be enabled then.
-    it.skip('Set-Cookie response header is tagged source=set-cookie-header',
+    // The Set-Cookie HTTP channel (CookieSource::kHTTP / "set-cookie-header").
+    // The renderer never sees the raw Set-Cookie (the network service strips it
+    // before responses reach Blink), so the crawler captures it over CDP
+    // (Network.responseReceivedExtraInfo) and synthesizes the storage-set edge
+    // into the graphml during the header-stitching rewrite.
+    it('Set-Cookie response header is tagged source=set-cookie-header',
       async () => {
         const testDir = await _createTempOutputDir()
         try {
@@ -515,5 +517,121 @@ describe('pagegraph-crawl', () => {
         await _cleanupTempOutputDir(testDir)
       }
     })
+
+    it('records a JS stack trace on cookie-write edges', async () => {
+      const testDir = await _createTempOutputDir()
+      try {
+        await _crawlUrl(makeTestUrl('cookie-async-stacks.html'), testDir)
+        const files = await _readCrawlResults(testDir)
+        assert.equal(files.length, 1)
+
+        const graphML = await readFile(join(testDir, files[0]), 'UTF-8')
+
+        // The engine declares the "stack trace" edge attribute and emits it on
+        // every edge produced by executing script.
+        assert.ok(
+          graphML.includes('attr.name="stack trace"'),
+          'stack trace attribute is declared')
+
+        // The synchronous nested write (outerSetter -> innerSetter ->
+        // document.cookie) should carry a stack naming both functions.
+        assert.ok(
+          graphML.includes('innerSetter'),
+          'stack trace names innerSetter')
+        assert.ok(
+          graphML.includes('outerSetter'),
+          'stack trace names outerSetter')
+
+        // The cookie writes from the timer and promise callbacks should carry an
+        // async parent chain, recovered because async call-stack depth is forced
+        // on isolate-wide.
+        assert.ok(
+          graphML.includes('"parent"'),
+          'stack trace includes an async parent chain')
+      } finally {
+        await _cleanupTempOutputDir(testDir)
+      }
+    })
+  })
+
+  describe('capture modes', () => {
+    it('--save-cookies writes a cookie inventory sidecar', async () => {
+      const testDir = await _createTempOutputDir()
+      try {
+        await _crawlUrl(makeTestUrl('cookie-document.html'), testDir, {
+          '--save-cookies': null
+        })
+        const files = await _readCrawlResults(testDir)
+        const cookiesFile = files.find((f) => f.endsWith('.cookies.json'))
+        assert.ok(cookiesFile, 'a .cookies.json sidecar was written')
+
+        const inventory = JSON.parse(
+          await readFile(join(testDir, cookiesFile), 'UTF-8'))
+        assert.ok(Array.isArray(inventory), 'inventory is an array')
+        assert.ok(
+          inventory.some((c) => c.name === 'doc-cookie'),
+          'inventory includes the JS-set cookie')
+      } finally {
+        await _cleanupTempOutputDir(testDir)
+      }
+    })
+
+    it('--save-cookies writes a per-cookie network map', async () => {
+      const testDir = await _createTempOutputDir()
+      try {
+        // page-cookies.js sets `test-cookie` (CookieStore) then makes an image
+        // request to document.svg that carries it in the outgoing Cookie header.
+        await _crawlUrl(makeTestUrl('cookies.html'), testDir, {
+          '--save-cookies': null
+        })
+        const files = await _readCrawlResults(testDir)
+        const netFile = files.find((f) => f.endsWith('.cookie-network.json'))
+        assert.ok(netFile, 'a .cookie-network.json sidecar was written')
+
+        const network = JSON.parse(
+          await readFile(join(testDir, netFile), 'UTF-8'))
+        const entry = network['test-cookie']
+        assert.ok(entry, 'network map includes test-cookie')
+        assert.ok(
+          Array.isArray(entry.sentTo) && entry.sentTo.length >= 1,
+          'test-cookie was carried by at least one request')
+        assert.ok(
+          entry.sentTo.some((s) => s.url && s.url.includes('document.svg')),
+          'a request carrying test-cookie names the resource URL')
+      } finally {
+        await _cleanupTempOutputDir(testDir)
+      }
+    })
+  })
+
+  describe('graph analysis', () => {
+    it('cookie-reads.mjs reports read sites + network and non-network consumers',
+      async () => {
+        const testDir = await _createTempOutputDir()
+        try {
+          // page-cookie-consumers.js reads `consumed` then feeds the value into
+          // fetch(url+value) (network sink) and JSON.parse (plain consumer).
+          await _crawlUrl(makeTestUrl('cookie-consumers.html'), testDir)
+          const files = await _readCrawlResults(testDir)
+          const graphml = files.find((f) => f.endsWith('.graphml'))
+          assert.ok(graphml, 'a graphml was produced')
+
+          const out = execFileSync('node',
+            ['analysis/cookie-reads.mjs', join(testDir, graphml), 'consumed'],
+            { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
+          const detail = JSON.parse(out)
+
+          assert.ok(detail.readers.length >= 1,
+            'the reading script is reported')
+          const net = detail.consumers.find((c) => c.isNetworkSink)
+          assert.ok(net, 'a network-sink consumer is reported')
+          assert.ok(/fetch/i.test(net.method), 'network sink is a fetch')
+          const plain = detail.consumers.find(
+            (c) => !c.isNetworkSink && /json/i.test(c.method))
+          assert.ok(plain, 'a non-network consumer (JSON.parse) is reported')
+        } finally {
+          await _cleanupTempOutputDir(testDir)
+        }
+      })
   })
 })

@@ -12,6 +12,11 @@ You work in the crawler repo: **`/Users/jazlan/Desktop/pagegraph-crawl`** (run a
 The crawler drives the binary over CDP and writes, per crawl, a `page_graph_<url>_<ts>.graphml` plus
 (when debugging) a `page_graph_<url>_<ts>.stacks.json` into the `-o` directory.
 
+**Never infer what the cookie does from its name.** Names are unreliable and often misleading —
+determine behavior only from the instrumented graph: its read (`.get`) sites and the consumers of the
+read value (`analysis/cookie-reads.mjs`), its written/read values, and its flows. The name is an
+identifier, not evidence of purpose.
+
 ## Tools you drive (do NOT hand-write CDP)
 
 - **Crawl**: `npm run crawl -- -b <binary> -u <url> -o <outDir> -t <secs> [debug flags]`
@@ -24,6 +29,12 @@ The crawler drives the binary over CDP and writes, per crawl, a `page_graph_<url
   - `--debug-max-captures <N>` (use ≤12)
 - **Find a cookie's sites**: `node analysis/cookie-sites.mjs <graphml> <cookieName>` →
   JSON `{ writes[], deletes[], reads{}, writeSpecs[] }`. Each write/delete has a ready `spec`.
+- **Reads + consumers (behavior evidence)**: `node analysis/cookie-reads.mjs <graphml> <cookieName>` →
+  the cookie's read (`.get`) sites + reader scripts and every consumer of the read value (network
+  sinks flagged `isNetworkSink` with `destUrl`, plus plain consumer functions). This is your evidence
+  for how the value is used and where it flows — cite it rather than inferring from the name. (Omit the
+  cookie name for a grouped index of all cookies; add `--split <dir>` to write one file per cookie when
+  the output is large.)
 - **Condense a stacks file** (NEVER read it raw): `node analysis/stacks-query.mjs <stacks.json> [--grep STR] [--frames N] [--record R] [--frame K]`.
   Use `--grep <cookieValueFragment>` to locate which frame/var holds a value; `--frame K --record R`
   to deep-dump one frame's scopes.
@@ -73,8 +84,10 @@ The crawler drives the binary over CDP and writes, per crawl, a `page_graph_<url
      frame (`<url>@<line>:<col>` from the capture) to capture its input, then stop.
    - **Needs deeper** — to see an earlier stage, pick a caller frame from the chain and re-run with
      its `<url>@<line>:<col>` as a new `--debug-breakpoint`. Repeat within budget.
-6. **Reads / usage**: note `reads.readersReturningCookie` (scripts that read a value containing the
-   cookie). Optionally capture one read site if it has a usable spec.
+6. **Reads / usage**: run `node analysis/cookie-reads.mjs <graphml> <cookie>` — its `readers` are the
+   scripts that read the cookie and its `consumers` are the functions/sinks that received the value
+   (with `isNetworkSink`/`destUrl` for network exfil). Combine with `cookie-sites.mjs`
+   `reads.readersReturningCookie`. This is the primary "how is it used / where does it flow" evidence.
 7. **Updates**: order `writes` by `timestamp`; note repeated writes / value changes.
 
 ## Output (write both to the run dir)

@@ -7,6 +7,8 @@ import assert from "node:assert";
 import { Readable, Writable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 
+import { Transform } from "node:stream";
+
 import {
   createXMLEditor,
   EditingRules,
@@ -100,6 +102,12 @@ export class PageGraphXMLRewriter {
     }
   }
 
+  // The graphml `<data key="...">` id for an edge attribute name, or undefined
+  // if the graph never declared it. Used to build synthesized edges by hand.
+  getEdgeAttrId(attrName: AttrName): AttrId | undefined {
+    return this.#edgeAttrIds.get(attrName);
+  }
+
   getAttrs(
     elm: Element,
     ...attrNames: AttrName[]
@@ -160,7 +168,9 @@ export class PageGraphXMLRewriter {
     return (elm: Element) => func(elm, this);
   }
 
-  async rewriteTo(input: Readable, output: Writable): Promise<void> {
+  // The streaming editor Transform on its own, so callers can splice extra
+  // stages (e.g. an edge-synthesizing injector) into the pipeline.
+  createTransform(): Transform {
     const editRules: EditingRules = {
       [attrElmsSelector]: this.#makeCollectAttrIdsFunc(),
     };
@@ -173,6 +183,10 @@ export class PageGraphXMLRewriter {
       editRules[nodeElmsSelector] = this.#makeEditingFunc(this.#nodeEditFunc);
     }
 
-    await pipeline(input, createXMLEditor(editRules), output);
+    return createXMLEditor(editRules);
+  }
+
+  async rewriteTo(input: Readable, output: Writable): Promise<void> {
+    await pipeline(input, this.createTransform(), output);
   }
 }

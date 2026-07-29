@@ -79,12 +79,66 @@ built on `xml-stream-editor`) and injects `headers`/`size` attributes onto reque
 `.headers.json`, `.png`); `--compress` gzips the graphml/headers. The graphml is first
 written to a `.tmp` file, then the header-stitching rewrite produces the final file.
 
+`writeGraphML` is **dual-mode** (`files.ts:~79`): on very large graphs the patched Brave build
+streams the graphml straight to disk inside `PAGEGRAPH_OUT_DIR` (set by `puppeteer.ts:93` to
+`resolve(args.outputPath)`) and `Page.generatePageGraph` returns that file's *path* instead of
+inline XML — detected via `existsSync(data)`. **Consequence:** the `-o` output path must be an
+existing directory, or the renderer can't create the streamed file and you get a 0-byte graphml
+with exit 0 (false success). A healthy run logs `generatePageGraph { size: N }` where N is the
+small returned path length (~80–90), not the graph size.
+
+**Crash recovery (two classes)** — heavy sites can abort the renderer during graph generation.
+`doCrawl` wraps `generatePageGraph`/`writeGraphML` in try/catch and, on failure, calls
+`recoverPartialGraphML` (`files.ts`). Two crash classes, two recovery sources:
+- *Serialization-time* (the graph is built; `ToGraphML` crashes mid-write): the streamed
+  `pagegraph_*.graphml` on disk is a valid, truncatable prefix. `findOrphanGraphML` +
+  `repairPartialGraphML` backward-scan it, drop any incomplete trailing `<node>`/`<edge>`, append the
+  footer (never `readFileSync` a multi-GB file), then stitch headers → `*.partial.graphml`.
+- *Recording-time* (renderer dies **before** `ToGraphML` runs, e.g. a JS-stack-overflow SIGBUS on
+  pgatour-class React sites — no streamed file ever exists): opt-in **`--recording-event-log`** makes
+  the renderer append every graph item to `pagegraph_eventlog_*.graphml.partial` as it records (tapped
+  at `AddGraphItem` in the custom Brave build). `recoverPartialGraphML` falls back to `findEventLog` and
+  reconstructs from it. Off by default (per-item disk writes during recording); enable for known-crashy
+  pages. Recovered graphs are *partial* (node attrs mutated after creation may be missing; `pageUrl`
+  can be empty). `cleanupEventLogs` deletes the redundant log after a healthy crawl.
+
+**Cookie sidecars** — `--save-cookies` writes two crash-proof JSON sidecars *before* graph
+generation (so they survive a graph-gen crash): `<name>.cookies.json` (full inventory via
+`Network.getAllCookies`) and `<name>.cookie-network.json` (per-cookie `{setBy, sentTo}` built by
+`RequestMetadataTracker.toCookieNetworkJSON()` from the non-pausing `*ExtraInfo` CDP data). These
+are the network/HTTP channel of a cookie's life; the JS channel lives in the graphml edges.
+
 **Browser profiles** — `resources/shields-up-profile/` and `resources/shields-down-profile/`
 are template Chromium user-data dirs. By default the chosen one is copied to a temp dir for
 the crawl and deleted after; `--persist-user-data-dir` keeps it, `--existing-user-data-dir`
 reuses one in place (mutually exclusive). `puppeteer.ts` also assembles the long list of
 disabled Brave/Chrome features and the `--enable-features=PageGraph` flag that activates the
 recording.
+
+**Cookie auditing, debug harness & analysis** — beyond a plain crawl, the tool supports a
+per-cookie lifecycle/provenance audit:
+- **Debug harness** (`debug_stack_tracker.ts`): `--debug-stacks` attaches CDP `Debugger` to capture
+  JS call stacks on cookie-write edges; `--debug-breakpoint`/`--debug-encoding` pause at write sites
+  to recover pre-encryption values (pass 2 for hand-rolled-crypto cookies). Caps: `--debug-max-captures`,
+  `--debug-max-value`. **Never `--debug-native`** — arming native breakpoints SIGTRAPs the renderer.
+- **Consent crawling**: `--extensions-path <dir>` loads an unpacked extension (adds
+  `--disable-extensions-except`/`--load-extension`). Used to load Consent-O-Matic (patched to accept-all)
+  so the full post-consent tracker cookie set fires — see the `consent-o-matic-crawl` auto-memory.
+- **Analysis** (`analysis/*.mjs`, run with Node 24): `cookie-reads.mjs` (per-cookie read sites + value
+  consumers), `cookie-flow.mjs` (consumer→network taint over `js call`→`js result` edges: did a JS
+  consumer actually `fetch`/XHR/`sendBeacon` the value, and where — `firedNetworkRequest` + `destUrl`;
+  default `--rounds 1` for the reliable direct signal, short/non-unique values collide with page HTML at
+  higher rounds), `cookie-sites.mjs` (JS write-site provenance), `edge-stacks.mjs`/`edge-stacks-stream.mjs`
+  (cookie-edge stack traces; the `-stream` variant avoids `readFileSync`'s ~512 MB string cap on
+  multi-GB graphs), `stacks-query.mjs`. **Never `readFileSync` a multi-GB graphml** — stream it.
+- The `cookie-lifecycle` / `cookie-dossier` skills drive this end-to-end via the
+  `cookie-lifecycle-analyst` / `cookie-analyst` subagents.
+
+**Custom Brave build (out of this repo)** — the crawler needs a PageGraph-enabled Brave. The user's
+build lives at `~/brave/src`; two local source patches matter (both documented in auto-memory):
+`page_graph.cc` `ToGraphML` streams to `PAGEGRAPH_OUT_DIR` (the dual-mode above), and a `HandleScope`
+fix in the `module_tree_linker.cc` chromium_src override (PageGraph's module hook called `V8Module()`
+with no scope, SIGABRT-ing on ES-module sites at load). Rebuild: `autoninja -C out/Release_arm64 brave`.
 
 ## Conventions
 

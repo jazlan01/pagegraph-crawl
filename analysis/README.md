@@ -6,6 +6,33 @@ debugger-driven cookie audit. They are the "tools" the **`cookie-analyst`** suba
 
 Plain Node ESM — no build step. Run from the repo root.
 
+> **Never infer what a cookie does from its name.** Names are unreliable/misleading — derive behavior
+> only from the graph: read (`.get`) sites, the consumers of the read value (`cookie-reads.mjs`), the
+> values written/read, and the flows. The name is an identifier, not evidence of purpose.
+
+## `cookie-reads.mjs`
+
+```
+node analysis/cookie-reads.mjs <graphml>                # index: all cookies, compact
+node analysis/cookie-reads.mjs <graphml> <cookieName>   # one cookie, full detail
+node analysis/cookie-reads.mjs <graphml> --split <dir>  # one detail file per cookie + index
+```
+
+For every cookie, extracts **where it was read** (`.get` — `document.cookie` / `cookieStore.get`) and
+**what consumed the read value** — any `js call` sink whose args contained the value, which may be a
+network request (`fetch`/`XMLHttpRequest.open|send`/`sendBeacon`/…, flagged `isNetworkSink` with a
+`destUrl`) **or** an ordinary consumer function (`JsonParse`, `btoa`, …). Built entirely from the
+PageGraph instrumentation (`storage read result` values, `read storage call` sites, `js call` args);
+no CDP re-derivation. Streams the graphml, so it works on multi-GB graphs where `readFileSync` would
+throw.
+
+Output is **grouped by cookie** so a driver reads one deterministic dump instead of many tool calls.
+The index carries a `detailBytes` size hint per cookie; when the dump is large, use `--split <dir>`
+(writes `<cookie>.json` per cookie + prints the size-sorted index) and read small cookies in batches,
+large ones individually, to protect the context window. Encoded/transformed values (e.g. PerimeterX
+`_px3`) may not value-match a consumer — the read site + reader script is still the evidence; don't
+conclude "no flow".
+
 ## `cookie-sites.mjs`
 
 ```

@@ -1,6 +1,8 @@
 import assert from "node:assert";
 import { createReadStream, createWriteStream } from "node:fs";
 import { readFile } from "node:fs/promises";
+import { Transform } from "node:stream";
+import { pipeline } from "node:stream/promises";
 
 import type { HTTPRequest, HTTPResponse } from "puppeteer-core";
 import { Element } from "xml-stream-editor";
@@ -12,10 +14,48 @@ interface HTTPHeader {
   value: string;
 }
 
+// Minimal shapes of the CDP events we consume. The full Protocol types live in
+// puppeteer-core's devtools-protocol, but we only touch these fields.
+interface RequestWillBeSentExtraInfo {
+  requestId: string;
+  headers: Record<string, string>;
+}
+
+interface ResponseReceivedExtraInfo {
+  requestId: string;
+  headers: Record<string, string>;
+}
+
 interface Metadata {
   headers: HTTPHeader[];
   size: number;
 }
+
+// The URL + method of a request, keyed by request id, so the per-cookie network
+// map can name which request carried or set each cookie.
+interface RequestInfo {
+  url: string;
+  method: string;
+}
+
+// A cookie set by an HTTP `Set-Cookie` response header, associated with the
+// request that carried the response. These are synthesized into the graph as
+// `storage set` edges tagged `cookie source = set-cookie-header`, because the
+// renderer never sees the raw `Set-Cookie` (the network service strips it), so
+// PageGraph cannot record them itself.
+interface SetCookie {
+  key: string;
+  value: string;
+}
+
+type RequestToHeadersMap = Record<RequestId, HTTPHeader[] | undefined>;
+type RequestToSetCookiesMap = Record<RequestId, SetCookie[] | undefined>;
+
+// The graphml `node type` / `edge type` / `cookie source` values we key off of.
+const nodeTypeCookieJar = "cookie jar";
+const nodeTypeResource = "resource";
+const edgeTypeStorageSet = "storage set";
+const cookieSourceSetCookieHeader = "set-cookie-header";
 
 enum RequestIdParseType {
   NAVIGATION,
@@ -33,6 +73,7 @@ type ResponseType = typeof HTTPResponse;
 type PuppeteerRequestId = string;
 type RequestId = number | string;
 type RequestToMetadataMap = Record<RequestId, Metadata | undefined>;
+type RequestToInfoMap = Record<RequestId, RequestInfo | undefined>;
 
 enum UpdateType {
   ADD = "ADD",
@@ -44,6 +85,10 @@ const edgeAttrEdgeType = "edge type";
 const edgeAttrRequestId = "request id";
 const edgeAttrHeaders = "headers";
 const edgeAttrSize = "size";
+const edgeAttrTimestamp = "timestamp";
+const edgeAttrKey = "key";
+const edgeAttrValue = "value";
+const edgeAttrCookieSource = "cookie source";
 
 const requestIdPatternWorker = /interception-job-([0-9]+)\.0/;
 const requestIdPatternNavigation = /^[A-Z0-9]{32}$/;
@@ -59,6 +104,17 @@ const headerSortFunc = (a: HTTPHeader, b: HTTPHeader) => {
 export class RequestMetadataTracker {
   #requestMetadata: RequestToMetadataMap = {};
   #responseMetadata: RequestToMetadataMap = {};
+  // Raw request/response headers from CDP `*ExtraInfo` events. Unlike the
+  // puppeteer `request/response.headers()` used above, these include the raw
+  // `Cookie` (outgoing) and `Set-Cookie` (incoming) headers, which puppeteer
+  // omits. Merged into the injected `headers` attribute at rewrite time.
+  #requestExtraHeaders: RequestToHeadersMap = {};
+  #responseExtraHeaders: RequestToHeadersMap = {};
+  // Cookies set by `Set-Cookie` response headers, per request.
+  #responseSetCookies: RequestToSetCookiesMap = {};
+  // URL + method per request id, so the per-cookie network map can name which
+  // request carried or set each cookie.
+  #requestInfo: RequestToInfoMap = {};
   readonly #logger: Logger | undefined;
   readonly #strict: boolean;
 
@@ -215,6 +271,10 @@ export class RequestMetadataTracker {
 
   async addMetadataFromRequest(request: RequestType): Promise<UpdateType> {
     const parseResult = this.#simplifyRequestId(request.id);
+    this.#requestInfo[parseResult.id] = {
+      url: request.url(),
+      method: request.method(),
+    };
     const bodySize =
       parseResult.type === RequestIdParseType.NAVIGATION
         ? -1
@@ -231,11 +291,205 @@ export class RequestMetadataTracker {
     return this.#addMetadata(parseResult.id, response, bodySize, collection);
   }
 
+  // The request id on CDP `*ExtraInfo` events uses the same formats puppeteer
+  // exposes, but a format we don't recognize should be skipped rather than
+  // abort the crawl, so this never throws.
+  #trySimplifyRequestId(
+    rawRequestId: PuppeteerRequestId,
+  ): RequestId | undefined {
+    try {
+      return this.#simplifyRequestId(rawRequestId).id;
+    } catch {
+      this.#logVerbose(
+        "trySimplifyRequestId",
+        `Skipping ExtraInfo for unrecognized request id "${rawRequestId}"`,
+      );
+      return undefined;
+    }
+  }
+
+  #headersFromObject(
+    headersObj: Record<string, string> | undefined,
+  ): HTTPHeader[] {
+    const headers: HTTPHeader[] = [];
+    if (!headersObj) {
+      return headers;
+    }
+    for (const [name, value] of Object.entries(headersObj)) {
+      headers.push({ name, value });
+    }
+    headers.sort(headerSortFunc);
+    return headers;
+  }
+
+  // CDP `Network.requestWillBeSentExtraInfo`: the raw outgoing request headers,
+  // including the `Cookie` header (which puppeteer's request.headers() omits).
+  addExtraInfoFromRequestEvent(event: RequestWillBeSentExtraInfo): void {
+    const requestId = this.#trySimplifyRequestId(event.requestId);
+    if (requestId === undefined) {
+      return;
+    }
+    this.#requestExtraHeaders[requestId] = this.#headersFromObject(
+      event.headers,
+    );
+  }
+
+  // CDP `Network.responseReceivedExtraInfo`: the raw incoming response headers,
+  // including `Set-Cookie` (which puppeteer's response.headers() omits, and
+  // which the renderer never sees so PageGraph cannot record).
+  addExtraInfoFromResponseEvent(event: ResponseReceivedExtraInfo): void {
+    const requestId = this.#trySimplifyRequestId(event.requestId);
+    if (requestId === undefined) {
+      return;
+    }
+    this.#responseExtraHeaders[requestId] = this.#headersFromObject(
+      event.headers,
+    );
+
+    const setCookies = this.#parseSetCookieHeaders(event.headers);
+    if (setCookies.length > 0) {
+      this.#responseSetCookies[requestId] = setCookies;
+    }
+  }
+
+  // CDP joins multiple `Set-Cookie` response headers into a single value
+  // separated by newlines. Each is a cookie definition whose leading
+  // `name=value` pair identifies the cookie.
+  #parseSetCookieHeaders(
+    headersObj: Record<string, string> | undefined,
+  ): SetCookie[] {
+    if (!headersObj) {
+      return [];
+    }
+    const cookies: SetCookie[] = [];
+    for (const [name, value] of Object.entries(headersObj)) {
+      if (name.toLowerCase() !== "set-cookie") {
+        continue;
+      }
+      for (const line of value.split("\n")) {
+        const trimmed = line.trim();
+        if (trimmed === "") {
+          continue;
+        }
+        const eqIndex = trimmed.indexOf("=");
+        const semiIndex = trimmed.indexOf(";");
+        const nameEnd = eqIndex === -1 ? trimmed.length : eqIndex;
+        const cookieName = trimmed.slice(0, nameEnd).trim();
+        const valueEnd = semiIndex === -1 ? trimmed.length : semiIndex;
+        const cookieValue =
+          eqIndex === -1 ? "" : trimmed.slice(eqIndex + 1, valueEnd).trim();
+        cookies.push({ key: cookieName, value: cookieValue });
+      }
+    }
+    return cookies;
+  }
+
+  // Merges base headers with the raw `*ExtraInfo` headers, letting the raw
+  // headers win on a name collision (case-insensitive), then re-sorts.
+  #mergeHeaders(base: HTTPHeader[], extra: HTTPHeader[]): HTTPHeader[] {
+    if (extra.length === 0) {
+      return base;
+    }
+    const extraNames = new Set(extra.map((h) => h.name.toLowerCase()));
+    const merged = base.filter((h) => !extraNames.has(h.name.toLowerCase()));
+    merged.push(...extra);
+    merged.sort(headerSortFunc);
+    return merged;
+  }
+
   toJSON(): string {
     return JSON.stringify({
       requests: this.#requestMetadata,
       responses: this.#responseMetadata,
     });
+  }
+
+  // Parses the cookie names present in outgoing `Cookie` request headers, e.g.
+  // `Cookie: a=1; b=2` -> ["a", "b"].
+  #cookieNamesFromHeaders(headers: HTTPHeader[]): string[] {
+    const names: string[] = [];
+    for (const header of headers) {
+      if (header.name.toLowerCase() !== "cookie") {
+        continue;
+      }
+      for (const pair of header.value.split(";")) {
+        const eqIndex = pair.indexOf("=");
+        const name = (eqIndex === -1 ? pair : pair.slice(0, eqIndex)).trim();
+        if (name !== "") {
+          names.push(name);
+        }
+      }
+    }
+    return names;
+  }
+
+  // Builds a per-cookie network map from the captured request/response headers:
+  // for each cookie name, which responses set it (`Set-Cookie`) and which
+  // requests carried it (outgoing `Cookie` header), each tagged with the request
+  // URL. This is the network-level view of every cookie's lifecycle, and is built
+  // entirely from the non-pausing CDP `*ExtraInfo` data, so it is available even
+  // when graph generation fails.
+  toCookieNetworkJSON(): string {
+    interface CookieSetEvent {
+      requestId: RequestId;
+      url: string | undefined;
+      value: string;
+    }
+    interface CookieSentEvent {
+      requestId: RequestId;
+      url: string | undefined;
+      method: string | undefined;
+    }
+    interface CookieNetwork {
+      setBy: CookieSetEvent[];
+      sentTo: CookieSentEvent[];
+    }
+    const cookies = new Map<string, CookieNetwork>();
+    const entryFor = (name: string): CookieNetwork => {
+      let entry = cookies.get(name);
+      if (entry === undefined) {
+        entry = { setBy: [], sentTo: [] };
+        cookies.set(name, entry);
+      }
+      return entry;
+    };
+
+    // Responses that set a cookie via `Set-Cookie` (keyed by the request they
+    // answered, whose URL is the setter's URL).
+    for (const [requestId, setCookies] of Object.entries(
+      this.#responseSetCookies,
+    )) {
+      if (setCookies === undefined) {
+        continue;
+      }
+      const url = this.#requestInfo[requestId]?.url;
+      for (const cookie of setCookies) {
+        entryFor(cookie.key).setBy.push({
+          requestId,
+          url,
+          value: cookie.value,
+        });
+      }
+    }
+
+    // Requests that carried a cookie in the outgoing `Cookie` header.
+    for (const [requestId, headers] of Object.entries(
+      this.#requestExtraHeaders,
+    )) {
+      if (headers === undefined) {
+        continue;
+      }
+      const info = this.#requestInfo[requestId];
+      for (const name of this.#cookieNamesFromHeaders(headers)) {
+        entryFor(name).sentTo.push({
+          requestId,
+          url: info?.url,
+          method: info?.method,
+        });
+      }
+    }
+
+    return JSON.stringify(Object.fromEntries(cookies), null, 2);
   }
 
   async fromJSONFile(fromPath: FilePath): Promise<void> {
@@ -259,32 +513,93 @@ export class RequestMetadataTracker {
   async rewriteGraphML(graphMLPath: FilePath, toPath: FilePath): Promise<void> {
     const inputStream = createReadStream(graphMLPath, { encoding: "utf8" });
     const outputStream = createWriteStream(toPath);
+    const rewriter = new PageGraphXMLRewriter();
+
+    // Graph structure collected during the streaming pass, used afterwards to
+    // synthesize `set-cookie-header` edges. All populated before the closing
+    // </graph> flows through the injector below.
+    let cookieJarNodeId: string | undefined;
+    const resourceNodeIds = new Set<string>();
+    const requestResourceNodeId: Record<RequestId, string | undefined> = {};
+    const requestTimestamp: Record<RequestId, string | undefined> = {};
+    let maxEdgeNumericId = 0;
+
+    const editNodeFunc = (elm: Element, editor: PageGraphXMLRewriter) => {
+      const nodeType = editor.getAttr(elm, "node type");
+      const nodeId = elm.attributes.id;
+      if (nodeType === nodeTypeCookieJar) {
+        cookieJarNodeId = nodeId;
+      } else if (nodeType === nodeTypeResource) {
+        resourceNodeIds.add(nodeId);
+      }
+      return elm;
+    };
 
     const editEdgeFunc = (elm: Element, editor: PageGraphXMLRewriter) => {
-      const attrs = editor.getAttrs(elm, edgeAttrEdgeType, edgeAttrRequestId);
+      // Track the largest edge id so synthesized edges get fresh, unique ids.
+      const edgeNumericId = parseInt(elm.attributes.id.replace(/^e/, ""), 10);
+      if (!Number.isNaN(edgeNumericId) && edgeNumericId > maxEdgeNumericId) {
+        maxEdgeNumericId = edgeNumericId;
+      }
+
+      const attrs = editor.getAttrs(
+        elm,
+        edgeAttrEdgeType,
+        edgeAttrRequestId,
+        edgeAttrTimestamp,
+      );
       const edgeType = attrs[edgeAttrEdgeType];
       assert(edgeType);
 
       let metadataCollection: RequestToMetadataMap | undefined;
+      let extraHeadersCollection: RequestToHeadersMap | undefined;
       switch (edgeType) {
         case "request start":
         case "request redirect":
           metadataCollection = this.#requestMetadata;
+          extraHeadersCollection = this.#requestExtraHeaders;
           break;
         case "request error":
         case "request complete":
           metadataCollection = this.#responseMetadata;
+          extraHeadersCollection = this.#responseExtraHeaders;
           break;
         default:
           return elm;
       }
-      assert(metadataCollection);
 
       const requestId = attrs[edgeAttrRequestId];
       assert(requestId);
 
+      // Remember where to attach synthesized Set-Cookie edges: the resource
+      // node of the completed request, and when it completed.
+      if (
+        edgeType === "request complete" &&
+        this.#responseSetCookies[requestId] !== undefined
+      ) {
+        const { source, target } = elm.attributes;
+        const resourceNodeId = resourceNodeIds.has(source)
+          ? source
+          : resourceNodeIds.has(target)
+            ? target
+            : undefined;
+        if (resourceNodeId !== undefined) {
+          requestResourceNodeId[requestId] = resourceNodeId;
+        }
+        const timestamp = attrs[edgeAttrTimestamp];
+        if (timestamp) {
+          requestTimestamp[requestId] = timestamp;
+        }
+      }
+
       const metadata = metadataCollection[requestId];
-      if (metadata === undefined) {
+      const extraHeaders = extraHeadersCollection[requestId] ?? [];
+      const mergedHeaders = this.#mergeHeaders(
+        metadata?.headers ?? [],
+        extraHeaders,
+      );
+
+      if (metadata === undefined && extraHeaders.length === 0) {
         if (this.#strict) {
           this.#error(
             "Unable to find metadata for request record in graphml. " +
@@ -294,13 +609,149 @@ export class RequestMetadataTracker {
         return elm;
       }
 
-      editor.setAttr(elm, edgeAttrHeaders, JSON.stringify(metadata.headers));
-      editor.setAttr(elm, edgeAttrSize, String(metadata.size));
+      if (mergedHeaders.length > 0) {
+        editor.setAttr(elm, edgeAttrHeaders, JSON.stringify(mergedHeaders));
+      }
+      if (metadata !== undefined) {
+        editor.setAttr(elm, edgeAttrSize, String(metadata.size));
+      }
       return elm;
     };
 
-    const rewriter = new PageGraphXMLRewriter();
+    rewriter.setNodeEditor(editNodeFunc);
     rewriter.setEdgeEditor(editEdgeFunc);
-    await rewriter.rewriteTo(inputStream, outputStream);
+
+    // Built lazily, once the streaming pass has populated the collections above.
+    const buildSynthesizedEdges = (): string =>
+      this.#buildSetCookieEdges(
+        rewriter,
+        cookieJarNodeId,
+        requestResourceNodeId,
+        requestTimestamp,
+        () => ++maxEdgeNumericId,
+      );
+
+    await pipeline(
+      inputStream,
+      rewriter.createTransform(),
+      makeGraphCloseInjector(buildSynthesizedEdges),
+      outputStream,
+    );
   }
+
+  // Builds the `<edge>` XML for every cookie set via an HTTP `Set-Cookie`
+  // header, each running from the request's resource node to the cookie jar and
+  // tagged `cookie source = set-cookie-header`. These have no JS stack (their
+  // provenance is the request, reachable via the shared `request id`).
+  #buildSetCookieEdges(
+    rewriter: PageGraphXMLRewriter,
+    cookieJarNodeId: string | undefined,
+    requestResourceNodeId: Record<RequestId, string | undefined>,
+    requestTimestamp: Record<RequestId, string | undefined>,
+    nextEdgeId: () => number,
+  ): string {
+    if (cookieJarNodeId === undefined) {
+      return "";
+    }
+    const edgeTypeId = rewriter.getEdgeAttrId(edgeAttrEdgeType);
+    const keyId = rewriter.getEdgeAttrId(edgeAttrKey);
+    const valueId = rewriter.getEdgeAttrId(edgeAttrValue);
+    const cookieSourceId = rewriter.getEdgeAttrId(edgeAttrCookieSource);
+    const requestIdId = rewriter.getEdgeAttrId(edgeAttrRequestId);
+    const timestampId = rewriter.getEdgeAttrId(edgeAttrTimestamp);
+    // If the engine build lacks any of these keys, skip synthesis entirely
+    // rather than emit malformed edges.
+    if (!edgeTypeId || !keyId || !valueId || !cookieSourceId) {
+      return "";
+    }
+
+    const dataElm = (keyAttrId: string, value: string): string =>
+      `<data key="${keyAttrId}">${xmlEscape(value)}</data>`;
+
+    let out = "";
+    for (const [requestId, cookies] of Object.entries(
+      this.#responseSetCookies,
+    )) {
+      if (cookies === undefined) {
+        continue;
+      }
+      const resourceNodeId = requestResourceNodeId[requestId];
+      if (resourceNodeId === undefined) {
+        // No resource node was found for this request, so there is nothing in
+        // the graph to attach the cookie to.
+        continue;
+      }
+      const timestamp = requestTimestamp[requestId];
+      for (const cookie of cookies) {
+        const edgeId = "e" + String(nextEdgeId());
+        out +=
+          `<edge id="${edgeId}" source="${xmlEscapeAttr(resourceNodeId)}"` +
+          ` target="${xmlEscapeAttr(cookieJarNodeId)}">`;
+        out += dataElm(edgeTypeId, edgeTypeStorageSet);
+        out += dataElm(keyId, cookie.key);
+        out += dataElm(valueId, cookie.value);
+        out += dataElm(cookieSourceId, cookieSourceSetCookieHeader);
+        if (requestIdId) {
+          out += dataElm(requestIdId, requestId);
+        }
+        if (timestampId && timestamp) {
+          out += dataElm(timestampId, timestamp);
+        }
+        out += "</edge>";
+      }
+    }
+    return out;
+  }
+}
+
+function xmlEscape(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function xmlEscapeAttr(value: string): string {
+  return xmlEscape(value).replace(/"/g, "&quot;");
+}
+
+// A Transform that injects text produced by `getInjection()` immediately before
+// the closing `</graph>` tag. Keeps a small carry buffer so the marker is still
+// found when it straddles a chunk boundary; streams everything else untouched.
+function makeGraphCloseInjector(getInjection: () => string): Transform {
+  const marker = "</graph>";
+  let carry = "";
+  let injected = false;
+
+  return new Transform({
+    decodeStrings: false,
+    transform(chunk: Buffer | string, _encoding, callback) {
+      let data = carry + chunk.toString();
+      if (!injected) {
+        const idx = data.indexOf(marker);
+        if (idx !== -1) {
+          data = data.slice(0, idx) + getInjection() + data.slice(idx);
+          injected = true;
+          carry = "";
+          callback(null, data);
+          return;
+        }
+        // Hold back the last (marker.length - 1) chars in case the marker is
+        // split across this and the next chunk.
+        const keep = marker.length - 1;
+        if (data.length > keep) {
+          carry = data.slice(data.length - keep);
+          callback(null, data.slice(0, data.length - keep));
+        } else {
+          carry = data;
+          callback();
+        }
+        return;
+      }
+      callback(null, data);
+    },
+    flush(callback) {
+      callback(null, carry);
+    },
+  });
 }

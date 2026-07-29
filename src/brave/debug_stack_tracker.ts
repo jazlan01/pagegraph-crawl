@@ -1,3 +1,5 @@
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { Protocol } from "devtools-protocol";
 import type { CDPSession } from "puppeteer-core";
 
@@ -21,6 +23,12 @@ export interface DebugStackOptions {
   // Max captured length per variable value; object variables are JSON-stringified
   // up to this length. Raise to capture full payloads/sensor objects.
   maxValue: number;
+  // If set, write the *loaded* source of every script whose URL matches a
+  // breakpoint's URL regex into this directory (one file per URL). Prod/obfuscated
+  // third-party bundles are often served differently to an out-of-band fetch, so
+  // breakpoint coordinates must be computed against the exact bytes the renderer
+  // ran — this dump provides them. Requires at least one `breakpoints` spec.
+  saveScriptsDir?: string;
 }
 
 interface CapturedVariable {
@@ -80,7 +88,8 @@ const SKIP_SCOPE_TYPES = new Set(["global", "with", "module", "script"]);
 const COOKIE_TARGETS: NativeTarget[] = [
   {
     label: "document.cookie",
-    expression: "Object.getOwnPropertyDescriptor(Document.prototype,'cookie').set",
+    expression:
+      "Object.getOwnPropertyDescriptor(Document.prototype,'cookie').set",
   },
   {
     label: "CookieStore.set",
@@ -145,6 +154,10 @@ export class DebugStackTracker {
   #armedContexts = new Set<number>();
   #offsetBreakpoints: OffsetBreakpoint[] = [];
   #armedOffsetKeys = new Set<string>();
+  // URL regexes from every breakpoint spec, used to decide which loaded scripts
+  // to dump (see saveScriptsDir); and the set of URLs already written.
+  #breakpointUrlRegexes: RegExp[] = [];
+  #savedScriptUrls = new Set<string>();
   #capping = false;
 
   constructor(logger: Logger | undefined, opts: DebugStackOptions) {
@@ -173,6 +186,9 @@ export class DebugStackTracker {
         // Offset breakpoints can only be placed once we can read the source to
         // convert offset -> (line, column), which is when the script parses.
         void this.#armOffsetsForScript(event);
+        // Dump the loaded source of breakpoint-targeted scripts so coordinates
+        // can be verified against the exact bytes the renderer ran.
+        void this.#maybeSaveScript(event);
       },
     );
 
@@ -296,6 +312,11 @@ export class DebugStackTracker {
 
     if (atIdx !== -1 && atIdx > hashIdx) {
       const urlRegex = spec.slice(0, atIdx);
+      try {
+        this.#breakpointUrlRegexes.push(new RegExp(urlRegex));
+      } catch {
+        /* invalid regex is reported below by setBreakpointByUrl */
+      }
       const parts = spec.slice(atIdx + 1).split(":");
       const lineNumber = Number(parts[0]);
       const columnNumber = Number(parts[1] ?? "0");
@@ -325,15 +346,23 @@ export class DebugStackTracker {
         return;
       }
       try {
+        const regex = new RegExp(urlRegex);
+        this.#breakpointUrlRegexes.push(regex);
         this.#offsetBreakpoints.push({
           spec,
           label: `bp:${spec}`,
-          regex: new RegExp(urlRegex),
+          regex,
           offset,
         });
-        this.#log("registerSpec", `deferred ${spec} until matching script parses`);
+        this.#log(
+          "registerSpec",
+          `deferred ${spec} until matching script parses`,
+        );
       } catch (err) {
-        this.#log("registerSpec", `invalid url regex in ${spec}: ${String(err)}`);
+        this.#log(
+          "registerSpec",
+          `invalid url regex in ${spec}: ${String(err)}`,
+        );
       }
       return;
     }
@@ -382,6 +411,41 @@ export class DebugStackTracker {
     }
   }
 
+  // Write the loaded source of a script whose URL matches any breakpoint regex,
+  // once per URL, into saveScriptsDir. The saved bytes are authoritative for
+  // computing line:col — a separate fetch of the same URL can differ.
+  async #maybeSaveScript(
+    event: Protocol.Debugger.ScriptParsedEvent,
+  ): Promise<void> {
+    const client = this.#client;
+    const dir = this.#opts.saveScriptsDir;
+    if (!client || dir === undefined || event.url === "") {
+      return;
+    }
+    if (!this.#breakpointUrlRegexes.some((re) => re.test(event.url))) {
+      return;
+    }
+    if (this.#savedScriptUrls.has(event.url)) {
+      return;
+    }
+    this.#savedScriptUrls.add(event.url);
+    try {
+      const src = (await client.send("Debugger.getScriptSource", {
+        scriptId: event.scriptId,
+      })) as Protocol.Debugger.GetScriptSourceResponse;
+      const safe = event.url.replace(/[^A-Za-z0-9._-]/g, "_").slice(-150);
+      const outPath = join(dir, `script_${safe}.loaded.js`);
+      writeFileSync(outPath, src.scriptSource);
+      this.#log(
+        "maybeSaveScript",
+        `wrote loaded source of ${event.url} -> ${outPath}`,
+      );
+    } catch (err) {
+      this.#savedScriptUrls.delete(event.url);
+      this.#log("maybeSaveScript", `failed ${event.url}: ${String(err)}`);
+    }
+  }
+
   async #onPaused(event: Protocol.Debugger.PausedEvent): Promise<void> {
     const client = this.#client;
     if (!client) {
@@ -399,7 +463,9 @@ export class DebugStackTracker {
             `reached max captures (${String(this.#opts.maxCaptures)}); deactivating breakpoints`,
           );
           try {
-            await client.send("Debugger.setBreakpointsActive", { active: false });
+            await client.send("Debugger.setBreakpointsActive", {
+              active: false,
+            });
           } catch {
             // best effort
           }
@@ -463,7 +529,10 @@ export class DebugStackTracker {
           continue;
         }
         seenScopeIds.add(objectId);
-        const { variables, truncated } = await this.#readScope(objectId, budget);
+        const { variables, truncated } = await this.#readScope(
+          objectId,
+          budget,
+        );
         scopes.push({ type: scope.type, variables, truncated });
       }
       out.push({
@@ -616,9 +685,7 @@ export class DebugStackTracker {
       str = obj.unserializableValue;
     } else if (obj.value !== undefined) {
       str =
-        typeof obj.value === "string"
-          ? obj.value
-          : JSON.stringify(obj.value);
+        typeof obj.value === "string" ? obj.value : JSON.stringify(obj.value);
     } else {
       str = obj.description ?? obj.type;
     }
