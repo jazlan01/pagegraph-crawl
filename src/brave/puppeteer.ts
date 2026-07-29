@@ -1,5 +1,5 @@
 import { cp } from "node:fs/promises";
-import { join } from "path";
+import { join, resolve } from "path";
 
 import puppeteerLib from "puppeteer-core";
 import type { LaunchOptions, Process } from "puppeteer-core";
@@ -86,7 +86,22 @@ const profilePathForArgs = async (args: CrawlArgs): Promise<ProfilePath> => {
 const makePuppeteerConf = async (args: CrawlArgs): Promise<PuppeteerConfig> => {
   const { profilePath, shouldClean } = await profilePathForArgs(args);
 
-  process.env.PAGEGRAPH_OUT_DIR = args.outputPath;
+  // PageGraph (the renderer) reads this to stream the graphml straight to disk
+  // instead of returning a >2GB blink::String over the DevTools pipe. It must be
+  // absolute: the renderer resolves relative paths against its own working
+  // directory, which is not guaranteed to match ours.
+  process.env.PAGEGRAPH_OUT_DIR = resolve(args.outputPath);
+
+  // Tier C: when --recording-event-log is set, tell the renderer to also write a
+  // durable per-item GraphML event log to the same dir as it records. This is
+  // the only thing that survives a *recording-time* crash (before ToGraphML
+  // runs); left unset, the renderer never opens the log and normal crawls pay
+  // nothing. See recoverPartialGraphML / findEventLog in files.ts.
+  if (args.recordingEventLog) {
+    process.env.PAGEGRAPH_EVENT_LOG_DIR = resolve(args.outputPath);
+  } else {
+    delete process.env.PAGEGRAPH_EVENT_LOG_DIR;
+  }
 
   const chromeArgs = [
     "--ash-no-nudges",
@@ -104,11 +119,28 @@ const makePuppeteerConf = async (args: CrawlArgs): Promise<PuppeteerConfig> => {
     "--disable-renderer-backgrounding",
     "--disable-site-isolation-trials",
     "--disable-sync",
-    "--enable-features=PageGraph",
     "--mute-audio",
     "--no-first-run",
+    // Required for the file-streaming graphml export: PageGraph::ToGraphML runs
+    // in the renderer and writes the graphml directly to PAGEGRAPH_OUT_DIR, but
+    // the renderer sandbox (esp. on macOS) blocks arbitrary file writes. This is
+    // an automated crawler on a controlled machine, and --no-sandbox is not
+    // page-detectable, so disabling it is acceptable here.
+    "--no-sandbox",
+    // Passive anti-detection: the canonical switch that keeps blink from
+    // exposing navigator.webdriver and other AutomationControlled tells. This
+    // does not inject any script into the page, so it leaves the recorded graph
+    // untouched (unlike navigator-patching stealth plugins). Paired with the
+    // ignoreDefaultArgs removal of --enable-automation below.
+    "--disable-blink-features=AutomationControlled",
+    // A realistic desktop window size; a 0x0 / tiny headful window is itself a
+    // bot tell and skews any screenshot. defaultViewport:null makes the page
+    // viewport follow this window size.
+    "--window-size=1920,1080",
     "--user-data-dir=" + profilePath,
   ];
+
+  chromeArgs.push("--enable-features=PageGraph");
 
   // Add --disable-setuid-sandbox if environment variable is set
   if (process.env.PAGEGRAPH_DISABLE_SETUID_SANDBOX === "true") {
@@ -118,6 +150,12 @@ const makePuppeteerConf = async (args: CrawlArgs): Promise<PuppeteerConfig> => {
   const puppeteerArgs = {
     defaultViewport: null,
     args: chromeArgs,
+    // Puppeteer injects --enable-automation by default, which paints the
+    // "controlled by automated test software" infobar and raises automation
+    // fingerprints that bot-management vendors (PerimeterX/HUMAN, Akamai,
+    // F5) key on. Dropping it makes the crawl look like an ordinary browser
+    // launch without touching the page or the recorded graph.
+    ignoreDefaultArgs: ["--enable-automation"],
     executablePath: args.executablePath,
     dumpio: args.loggingLevel === "verbose",
     headless: false,

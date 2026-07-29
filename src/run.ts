@@ -182,6 +182,26 @@ parser.add_argument("--debug-max-value", {
   dest: "debug_max_value",
   default: 512,
 });
+parser.add_argument("--save-cookies", {
+  help:
+    "Dump the full cookie store (all first- and third-party cookies, including " +
+    "httpOnly) over CDP at the end of the crawl to a <output>.cookies.json " +
+    "sidecar. Gives an authoritative inventory to pair with the graph.",
+  action: "store_true",
+  dest: "save_cookies",
+  default: false,
+});
+parser.add_argument("--recording-event-log", {
+  help:
+    "Write a durable GraphML event log to the output dir as PageGraph records " +
+    "each node/edge, so a RECORDING-time renderer crash (which happens before " +
+    "generatePageGraph runs and leaves nothing to stream) still yields a " +
+    "recoverable partial graph. Adds per-item disk writes during recording, so " +
+    "it is off by default; enable it for pages that reliably crash graph gen.",
+  action: "store_true",
+  dest: "recording_event_log",
+  default: false,
+});
 // parser.add_argument('--no-stealth', {
 //   help: 'Do not enable the "puppeteer-extra-plugin-stealth" extension.',
 //   default: false,

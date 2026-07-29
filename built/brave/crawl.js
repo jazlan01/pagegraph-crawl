@@ -1,13 +1,15 @@
 import assert from "node:assert/strict";
 import * as osLib from "os";
+import { resolve } from "node:path";
 import { harFromMessages } from "chrome-har";
 import Xvbf from "xvfb";
 import { isTopLevelPageNavigation, isTimeoutError } from "./checks.js";
 import { asHTTPUrl } from "./checks.js";
 import { DebugStackTracker } from "./debug_stack_tracker.js";
 import { createScreenshotPath, deleteAtPath } from "./files.js";
-import { writeGraphML } from "./files.js";
+import { writeGraphML, recoverPartialGraphML, cleanupEventLogs, } from "./files.js";
 import { writeHAR, writeHeadersLog, writeStacks } from "./files.js";
+import { writeCookies, writeCookieNetwork } from "./files.js";
 import { getLogger } from "./logging.js";
 import { makeNavigationTracker } from "./navigation_tracker.js";
 import { selectRandomChildUrl } from "./page.js";
@@ -98,19 +100,28 @@ const prepareHARGenerator = async (client, networkEvents, pageEvents, storeHarBo
         });
     });
 };
-const generatePageGraph = async (seconds, page, client, waitFunc, logger, stackTracker) => {
-    logger.info(`Waiting for ${String(seconds)}s`);
-    await waitUntilUnless(seconds, waitFunc);
-    // Detach the debugger before generating the graph: a renderer paused at a
-    // breakpoint cannot run Page.generatePageGraph (it times out).
-    if (stackTracker) {
-        await stackTracker.disable();
-    }
+const generatePageGraph = async (client, logger) => {
+    // The caller is responsible for the dwell and for detaching any debugger
+    // (a renderer paused at a breakpoint cannot run Page.generatePageGraph) and
+    // for dumping the cookie inventory first — graph generation can abort the
+    // renderer (SIGABRT) on very large pages, so anything we want regardless of
+    // the graph must be collected before this call.
     logger.info("calling generatePageGraph");
     const response = await client.send("Page.generatePageGraph");
     const responseLen = response.data.length;
     logger.info("generatePageGraph { size: ", responseLen, " }");
     return response;
+};
+// Dump the full cookie store (all first- and third-party cookies, including
+// httpOnly ones JS cannot see) over CDP. Best-effort: returns [] on failure.
+const dumpCookieStore = async (client) => {
+    try {
+        const result = await client.send("Network.getAllCookies");
+        return (result.cookies ?? []);
+    }
+    catch {
+        return [];
+    }
 };
 export const doCrawl = async (args, previouslySeenUrls) => {
     const logger = getLogger(args);
@@ -161,6 +172,10 @@ export const doCrawl = async (args, previouslySeenUrls) => {
                     breakpoints: args.debugBreakpoints,
                     maxCaptures: args.debugMaxCaptures,
                     maxValue: args.debugMaxValue,
+                    // Dump loaded sources of breakpoint-targeted scripts alongside the
+                    // stacks, so break coordinates can be verified against the exact bytes
+                    // the renderer ran (obfuscated bundles drift vs. an out-of-band fetch).
+                    saveScriptsDir: args.outputPath,
                 });
                 // Enable before navigation so breakpoints exist when scripts parse.
                 await stackTracker.enable(client);
@@ -184,6 +199,17 @@ export const doCrawl = async (args, previouslySeenUrls) => {
                 await page.setUserAgent(args.userAgent);
             }
             const metadataTracker = new RequestMetadataTracker(logger);
+            // Subscribe to the CDP *ExtraInfo events, which carry the raw Cookie
+            // (outgoing) and Set-Cookie (incoming) headers that puppeteer strips.
+            // These are non-pausing. Network is already enabled when storing a HAR;
+            // enabling it again is a harmless no-op.
+            await client.send("Network.enable");
+            client.on("Network.requestWillBeSentExtraInfo", (event) => {
+                metadataTracker.addExtraInfoFromRequestEvent(event);
+            });
+            client.on("Network.responseReceivedExtraInfo", (event) => {
+                metadataTracker.addExtraInfoFromResponseEvent(event);
+            });
             await page.setRequestInterception(true);
             // First load is not a navigation redirect, so we need to skip it.
             page.on("request", async (request) => {
@@ -261,13 +287,56 @@ export const doCrawl = async (args, previouslySeenUrls) => {
                 }
             }
             logger.info("Loaded ", String(urlToCrawl));
-            const response = await generatePageGraph(args.seconds, page, client, shouldStopWaitingFunc, logger, stackTracker);
-            if (args.saveRequestHeaders) {
-                await writeHeadersLog(args, urlToCrawl, metadataTracker.toJSON(), logger);
+            // Dwell so the page executes (and any breakpoints fire) before the graph
+            // is generated.
+            logger.info(`Waiting for ${String(args.seconds)}s`);
+            await waitUntilUnless(args.seconds, shouldStopWaitingFunc);
+            // Detach the debugger (resuming any pause) before graph generation or
+            // teardown — a renderer paused at a breakpoint cannot run
+            // Page.generatePageGraph, and closing it mid-pause throws.
+            if (stackTracker) {
+                await stackTracker.disable();
             }
-            await writeGraphML(args, urlToCrawl, response, metadataTracker, logger);
+            // Dump the cookie inventory NOW, while the renderer is alive and before
+            // graph generation. Page.generatePageGraph can abort the renderer
+            // (SIGABRT / "code 6") on very large pages; collecting cookies first means
+            // a graph-gen crash still leaves us the authoritative 1P/3P inventory.
+            if (args.saveCookies) {
+                await writeCookies(args, urlToCrawl, JSON.stringify(await dumpCookieStore(client), null, 2), logger);
+                // Network-level per-cookie view (which requests carried each cookie and
+                // which responses set it). Written here, before graph generation, so it
+                // survives a graph-gen crash just like the cookie inventory.
+                await writeCookieNetwork(args, urlToCrawl, metadataTracker.toCookieNetworkJSON(), logger);
+            }
             if (args.debugStacks && stackTracker) {
                 await writeStacks(args, urlToCrawl, JSON.stringify(stackTracker.getRecords(), null, 2), logger);
+            }
+            // Graph generation can abort the renderer (SIGABRT) on very large pages.
+            // The cookie sidecars above are already on disk, and the rebuilt renderer
+            // streams the graphml incrementally, so a crash here still leaves a valid
+            // GraphML prefix on disk. Capture whether we produced a graph; if the CDP
+            // call rejects (renderer died) or writeGraphML yields nothing, fall back
+            // to recovering + tail-repairing that partial streamed file.
+            let graphmlPath = null;
+            try {
+                const response = await generatePageGraph(client, logger);
+                if (args.saveRequestHeaders) {
+                    await writeHeadersLog(args, urlToCrawl, metadataTracker.toJSON(), logger);
+                }
+                graphmlPath = await writeGraphML(args, urlToCrawl, response, metadataTracker, logger);
+            }
+            catch (err) {
+                logger.error("generatePageGraph failed; attempting partial-graph recovery: ", String(err));
+            }
+            if (graphmlPath === null) {
+                graphmlPath = await recoverPartialGraphML(args, urlToCrawl, metadataTracker, logger);
+                if (graphmlPath === null) {
+                    logger.error("no graph could be recovered for: ", String(urlToCrawl));
+                }
+            }
+            else if (args.recordingEventLog) {
+                // generatePageGraph succeeded, so any Tier C event log is redundant.
+                await cleanupEventLogs(resolve(args.outputPath), logger);
             }
             // Store HAR
             if (args.storeHar) {

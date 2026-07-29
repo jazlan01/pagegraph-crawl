@@ -95,6 +95,8 @@ export const validate = (rawArgs) => {
     const debugBreakpoints = rawArgs.debug_breakpoint ?? [];
     const debugMaxCaptures = rawArgs.debug_max_captures;
     const debugMaxValue = rawArgs.debug_max_value;
+    const saveCookies = rawArgs.save_cookies;
+    const recordingEventLog = rawArgs.recording_event_log;
     const validatedArgs = {
         executablePath: String(executablePath),
         outputPath,
@@ -121,6 +123,8 @@ export const validate = (rawArgs) => {
         debugBreakpoints,
         debugMaxCaptures,
         debugMaxValue,
+        saveCookies,
+        recordingEventLog,
     };
     if (rawArgs.proxy_server !== undefined) {
         try {

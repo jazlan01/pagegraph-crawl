@@ -103,6 +103,8 @@ export const validate = (rawArgs: any): ValidationResult => {  // eslint-disable
   const debugBreakpoints: string[] = rawArgs.debug_breakpoint ?? [];
   const debugMaxCaptures: number = rawArgs.debug_max_captures;
   const debugMaxValue: number = rawArgs.debug_max_value;
+  const saveCookies: boolean = rawArgs.save_cookies;
+  const recordingEventLog: boolean = rawArgs.recording_event_log;
   const validatedArgs: CrawlArgs = {
     executablePath: String(executablePath),
     outputPath,
@@ -129,6 +131,8 @@ export const validate = (rawArgs: any): ValidationResult => {  // eslint-disable
     debugBreakpoints,
     debugMaxCaptures,
     debugMaxValue,
+    saveCookies,
+    recordingEventLog,
   };
 
   if (rawArgs.proxy_server !== undefined) {

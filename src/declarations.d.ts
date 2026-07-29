@@ -36,6 +36,8 @@ interface CrawlArgs {
   debugBreakpoints: string[];
   debugMaxCaptures: number;
   debugMaxValue: number;
+  saveCookies: boolean;
+  recordingEventLog: boolean;
 }
 
 type ValidationResult = [boolean, CrawlArgs | ErrorMsg];
