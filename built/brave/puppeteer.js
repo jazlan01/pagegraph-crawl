@@ -131,6 +131,15 @@ const makePuppeteerConf = async (args) => {
         executablePath: args.executablePath,
         dumpio: args.loggingLevel === "verbose",
         headless: false,
+        // Puppeteer caps every CDP call at 180s by default, including
+        // Page.generatePageGraph. A news or retail front page yields a multi-GB
+        // graph that legitimately takes longer than that to serialize, and hitting
+        // the cap is indistinguishable from a dead renderer: the call rejects, the
+        // crawler drops into partial-graph recovery, and a healthy full graph is
+        // thrown away in favour of a smaller one rebuilt from the event log. A
+        // genuinely dead renderer is still caught promptly by Target.targetCrashed,
+        // so raising this only removes the false positive.
+        protocolTimeout: 1_800_000,
     };
     if (args.loggingLevel === "verbose") {
         chromeArgs.push("--enable-logging=stderr");

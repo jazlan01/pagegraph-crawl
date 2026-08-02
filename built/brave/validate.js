@@ -96,7 +96,20 @@ export const validate = (rawArgs) => {
     const debugMaxCaptures = rawArgs.debug_max_captures;
     const debugMaxValue = rawArgs.debug_max_value;
     const saveCookies = rawArgs.save_cookies;
+    const saveBodies = rawArgs.save_bodies;
+    const saveBodiesFull = rawArgs.save_bodies_full;
+    const bodyMax = rawArgs.body_max;
+    const bodiesBudgetMb = rawArgs.bodies_budget_mb;
     const recordingEventLog = rawArgs.recording_event_log;
+    if (bodyMax < 0) {
+        return [false, `--body-max must not be negative: ${String(bodyMax)}`];
+    }
+    if (bodiesBudgetMb < 0) {
+        return [
+            false,
+            `--bodies-budget-mb must not be negative: ${String(bodiesBudgetMb)}`,
+        ];
+    }
     const validatedArgs = {
         executablePath: String(executablePath),
         outputPath,
@@ -124,6 +137,10 @@ export const validate = (rawArgs) => {
         debugMaxCaptures,
         debugMaxValue,
         saveCookies,
+        saveBodies,
+        saveBodiesFull,
+        bodyMax,
+        bodiesBudgetMb,
         recordingEventLog,
     };
     if (rawArgs.proxy_server !== undefined) {

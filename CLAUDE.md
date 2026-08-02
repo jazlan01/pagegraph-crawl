@@ -102,11 +102,36 @@ small returned path length (~80–90), not the graph size.
   pages. Recovered graphs are *partial* (node attrs mutated after creation may be missing; `pageUrl`
   can be empty). `cleanupEventLogs` deletes the redundant log after a healthy crawl.
 
-**Cookie sidecars** — `--save-cookies` writes two crash-proof JSON sidecars *before* graph
+**Cookie sidecars** — `--save-cookies` writes three crash-proof JSON sidecars *before* graph
 generation (so they survive a graph-gen crash): `<name>.cookies.json` (full inventory via
-`Network.getAllCookies`) and `<name>.cookie-network.json` (per-cookie `{setBy, sentTo}` built by
-`RequestMetadataTracker.toCookieNetworkJSON()` from the non-pausing `*ExtraInfo` CDP data). These
+`Network.getAllCookies`), `<name>.cookie-network.json` (per-cookie `{setBy, sentTo}` built by
+`RequestMetadataTracker.toCookieNetworkJSON()` from the non-pausing `*ExtraInfo` CDP data), and
+`<name>.redirects.json` (the per-hop chain of every request that redirected). These
 are the network/HTTP channel of a cookie's life; the JS channel lives in the graphml edges.
+
+**Request/response bodies** (`body_log.ts`) — PageGraph records a request's *size* but never its
+content, so a value leaving the page in a POST body is invisible in the graph. The crawler already
+pulled every body over CDP to measure that size and threw the bytes away; it now keeps them in
+`<name>.bodies.ndjson`, **on by default** (`--no-save-bodies` to skip). NDJSON, not one JSON object:
+bodies are large and must not accumulate in RAM, and each line is durable the moment it is written.
+Records join to the graph by `requestId` — the same simplified id injected as the `request id` edge
+attribute. Response bodies are limited to textual MIME types (`--save-bodies-full` to keep all);
+request bodies are always kept. `--body-max` caps each body, `--bodies-budget-mb` caps the total;
+every request/response emits a record even when its body was dropped, with `size` + `sha256` always
+present, so "dropped" is never confused with "not observed". Known gap: `Network.getRequestPostData`
+returns only UTF-8 text, so binary multipart uploads are unavailable (flagged as
+`postDataUnavailable`).
+
+**Redirect hops** — a redirect chain shares ONE request id, so storing response metadata per id
+collapses the chain to its last hop: every intermediate `Set-Cookie` is lost and the survivors are
+misattributed to the final URL. That is exactly the cookie-sync pattern (a tracker bouncing through
+partners, each dropping an identifier), so `RequestMetadataTracker` keeps a hop array per request id
+(`#hopsByRequest`), indexed by puppeteer's `redirectChain().length`. Two ordering facts, both verified
+against `test/pages/redirect-subresource-chain.html` and easy to get wrong: raw CDP
+`Network.requestWillBeSent` fires only **once** for an entire chain when request interception is on,
+and `response.request()` on a redirect response returns the chain's *latest* request rather than the
+one it answered — so responses and `*ExtraInfo` events are attributed positionally, to the most
+recently started hop.
 
 **Browser profiles** — `resources/shields-up-profile/` and `resources/shields-down-profile/`
 are template Chromium user-data dirs. By default the chosen one is copied to a temp dir for
@@ -133,6 +158,29 @@ per-cookie lifecycle/provenance audit:
   multi-GB graphs), `stacks-query.mjs`. **Never `readFileSync` a multi-GB graphml** — stream it.
 - The `cookie-lifecycle` / `cookie-dossier` skills drive this end-to-end via the
   `cookie-lifecycle-analyst` / `cookie-analyst` subagents.
+
+**Engine instrumentation added on top of upstream PageGraph** (all in `~/brave/src/brave`, covered by
+the `engine instrumentation` tests, which fail against an older engine build):
+- **`script position` on cookie READ edges** (`edge_storage_read_call.{h,cc}`, `RegisterStorageRead`).
+  Writes already had the byte offset; reads did not, so call sites had to be recovered from stack
+  traces — a workaround that fails when a frame's script has no recorded source. It was never a
+  capability limit: the read hook called `GetCurrentActingNode(ctx)` while the write hook passed
+  `&script_position`. Same V8 stack, same binding; the out-param doubles as the "include position"
+  flag. Delete/clear still lack it.
+- **`response hash` on `request complete`** (`edge_request_complete.{h,cc}`). The SHA-256 was already
+  computed in `TrackedRequest` and passed to the edge, but never emitted — a declared attribute with
+  no producer. Identifies a body without recording it, so it joins the body sidecar.
+- **postMessage** (`chromium_src/.../bind_gen/interface.py`: `Window`, `MessagePort`, `Worker`,
+  `ServiceWorker`, `DedicatedWorkerGlobalScope`, `BroadcastChannel`). Cross-frame identifier passing
+  was invisible — `EdgeCrossDOM` is the frame-owner→document *structural* link with no attributes.
+  Each send now produces a `js call` edge whose `args` holds the payload as **real JSON** (structured
+  clones do not degrade to `[object Object]`), plus a `script position`. **Send side only**: PageGraph
+  records no dispatch edge, and `AddGraphItem` drops cross-context edges, so cross-frame joins are
+  made by matching the payload value.
+
+Still open from the same review: shadow-root host edges (see the `pagegraph-shadow-dom-islands`
+auto-memory — content is recorded but unreachable from the DOM root), per-hop redirect status on
+`EdgeRequestRedirect`, request method, and response status/MIME via `DidReceiveResourceResponse`.
 
 **Custom Brave build (out of this repo)** — the crawler needs a PageGraph-enabled Brave. The user's
 build lives at `~/brave/src`; two local source patches matter (both documented in auto-memory):

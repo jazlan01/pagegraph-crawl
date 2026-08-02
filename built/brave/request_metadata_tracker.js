@@ -47,16 +47,24 @@ export class RequestMetadataTracker {
     // omits. Merged into the injected `headers` attribute at rewrite time.
     #requestExtraHeaders = {};
     #responseExtraHeaders = {};
-    // Cookies set by `Set-Cookie` response headers, per request.
+    // Cookies set by `Set-Cookie` response headers, per request. Accumulated
+    // across every hop of a redirect chain rather than overwritten, so no hop's
+    // cookies are lost even if per-hop attribution below fails.
     #responseSetCookies = {};
+    // The hop chain per request id.
+    #hopsByRequest = {};
     // URL + method per request id, so the per-cookie network map can name which
     // request carried or set each cookie.
     #requestInfo = {};
     #logger;
     #strict;
-    constructor(logger, strict = false) {
+    // When set, every request/response body observed is streamed to this log
+    // instead of being discarded after its length is measured.
+    #bodyLog;
+    constructor(logger, strict = false, bodyLog) {
         this.#logger = logger;
         this.#strict = strict;
+        this.#bodyLog = bodyLog;
     }
     #log(methodName, msg) {
         if (!this.#logger) {
@@ -73,24 +81,36 @@ export class RequestMetadataTracker {
     #error(msg) {
         throw new Error(msg);
     }
-    #requestBodySize = async (request) => {
+    // Fetches a request's post data over CDP, keeping both its size (for the
+    // graphml `size` attribute) and the bytes themselves (for the body sidecar).
+    // The CDP round trip happens either way, so retaining the body is free.
+    //
+    // `size` stays the string length rather than the byte length, because that is
+    // what the graphml `size` attribute has always carried.
+    #captureRequestBody = async (request) => {
         try {
             const requestBody = await request.fetchPostData();
-            return requestBody ? +requestBody.length : 0;
+            if (!requestBody) {
+                return { size: 0 };
+            }
+            return { size: +requestBody.length, body: requestBody };
         }
         catch {
-            this.#log("#requestBodySize", "No content for response: " + String(request.url()));
-            return 0;
+            this.#log("#captureRequestBody", "No content for request: " + String(request.url()));
+            return { size: 0 };
         }
     };
-    #responseBodySize = async (response) => {
+    #captureResponseBody = async (response) => {
         try {
             const body = await response.content();
-            return +body.length;
+            // Puppeteer returns bytes, but tolerate a string in case a future version
+            // (or a mocked response) hands back decoded text.
+            const bytes = typeof body === "string" ? Buffer.from(body, "utf8") : body;
+            return { size: +body.length, bytes, failed: false };
         }
         catch {
-            this.#log("#responseBodySize", "No content for response: " + String(response.url()));
-            return 0;
+            this.#log("#captureResponseBody", "No content for response: " + String(response.url()));
+            return { size: 0, failed: true };
         }
     };
     #addMetadata(requestId, reqOrRes, bodySize, collection) {
@@ -164,22 +184,61 @@ export class RequestMetadataTracker {
     }
     async addMetadataFromRequest(request) {
         const parseResult = this.#simplifyRequestId(request.id);
+        this.#noteRequestHop(parseResult.id, request);
         this.#requestInfo[parseResult.id] = {
             url: request.url(),
             method: request.method(),
         };
-        const bodySize = parseResult.type === RequestIdParseType.NAVIGATION
-            ? -1
-            : await this.#requestBodySize(request);
+        // Navigation requests keep the historical `-1` size and are not fetched over
+        // CDP. `postData()` is synchronous and already populated from
+        // `requestWillBeSent`, so a form-submit navigation body is still captured
+        // without reintroducing a round trip here.
+        const captured = parseResult.type === RequestIdParseType.NAVIGATION
+            ? { size: -1, body: request.postData() }
+            : await this.#captureRequestBody(request);
+        if (this.#bodyLog !== undefined) {
+            await this.#bodyLog.appendRequest({
+                requestId: parseResult.id,
+                rawRequestId: request.id,
+                url: request.url(),
+                method: request.method(),
+                resourceType: request.resourceType(),
+                body: captured.body,
+                hasPostData: request.hasPostData() === true,
+            });
+        }
         const collection = this.#requestMetadata;
-        return this.#addMetadata(parseResult.id, request, bodySize, collection);
+        return this.#addMetadata(parseResult.id, request, captured.size, collection);
     }
     async addMetadataFromResponse(response) {
         const rawRequestId = response.request().id;
         const parseResult = this.#simplifyRequestId(rawRequestId);
-        const bodySize = await this.#responseBodySize(response);
+        // Record the status against the hop this response ended, so an intermediate
+        // 302 is not overwritten by the chain's final 200.
+        //
+        // Positional rather than `response.request().redirectChain()`: for a redirect
+        // response that returns the chain's *latest* request, not the one this
+        // response answered, which lands every hop's status on the final hop.
+        const hopForResponse = this.#currentHop(parseResult.id);
+        if (hopForResponse !== undefined) {
+            hopForResponse.status = response.status();
+        }
+        const captured = await this.#captureResponseBody(response);
+        if (this.#bodyLog !== undefined) {
+            const headers = response.headers();
+            await this.#bodyLog.appendResponse({
+                requestId: parseResult.id,
+                rawRequestId,
+                url: response.url(),
+                status: response.status(),
+                mimeType: headers["content-type"],
+                resourceType: response.request().resourceType(),
+                bytes: captured.bytes,
+                failed: captured.failed,
+            });
+        }
         const collection = this.#responseMetadata;
-        return this.#addMetadata(parseResult.id, response, bodySize, collection);
+        return this.#addMetadata(parseResult.id, response, captured.size, collection);
     }
     // The request id on CDP `*ExtraInfo` events uses the same formats puppeteer
     // exposes, but a format we don't recognize should be skipped rather than
@@ -204,6 +263,54 @@ export class RequestMetadataTracker {
         headers.sort(headerSortFunc);
         return headers;
     }
+    // Records which hop of a redirect chain a request event represents.
+    //
+    // `redirectChain()` is the hop index directly: 0 for the original request, 1 for
+    // the first redirect target, and so on. A hop index of 0 therefore also marks a
+    // brand new request reusing this id, which is the case the old last-wins storage
+    // was really guarding against.
+    //
+    // Must be called before any `await`, so the reset cannot race the
+    // `responseReceivedExtraInfo` events whose cookies it clears.
+    #noteRequestHop(requestId, request) {
+        const hopIndex = request.redirectChain().length;
+        if (hopIndex === 0) {
+            // A fresh logical request, so discard any previous chain under this id —
+            // matching the existing "most recent request wins" behaviour, but at
+            // whole-chain rather than per-hop granularity.
+            this.#hopsByRequest[requestId] = [{ url: request.url() }];
+            this.#responseSetCookies[requestId] = undefined;
+            return;
+        }
+        const hops = this.#hopsByRequest[requestId] ?? [];
+        hops[hopIndex] = { url: request.url() };
+        this.#hopsByRequest[requestId] = hops;
+    }
+    // The hop a just-arrived `*ExtraInfo` event belongs to. Those events carry no
+    // URL and no request object, so the hop is identified positionally: always the
+    // most recently started one, because a redirect's response is delivered before
+    // the browser issues the next hop's request (verified against a three-hop
+    // fixture: req/res strictly interleave per hop).
+    #currentHop(requestId) {
+        const hops = this.#hopsByRequest[requestId];
+        if (hops === undefined || hops.length === 0) {
+            return undefined;
+        }
+        return hops[hops.length - 1];
+    }
+    // The hop chain of every request that redirected at least once, keyed by
+    // request id. Written to a sidecar because the graphml's request edges declare
+    // only `headers` and `size`, so there is nowhere in the graph to put per-hop
+    // status or `Set-Cookie`.
+    toRedirectChainsJSON() {
+        const chains = {};
+        for (const [requestId, hops] of Object.entries(this.#hopsByRequest)) {
+            if (hops !== undefined && hops.length > 1) {
+                chains[requestId] = hops;
+            }
+        }
+        return JSON.stringify(chains, null, 2);
+    }
     // CDP `Network.requestWillBeSentExtraInfo`: the raw outgoing request headers,
     // including the `Cookie` header (which puppeteer's request.headers() omits).
     addExtraInfoFromRequestEvent(event) {
@@ -221,10 +328,24 @@ export class RequestMetadataTracker {
         if (requestId === undefined) {
             return;
         }
-        this.#responseExtraHeaders[requestId] = this.#headersFromObject(event.headers);
+        const headers = this.#headersFromObject(event.headers);
+        this.#responseExtraHeaders[requestId] = headers;
+        // These events carry no URL, so the hop is identified positionally: this
+        // response belongs to the most recently started hop.
         const setCookies = this.#parseSetCookieHeaders(event.headers);
+        const hop = this.#currentHop(requestId);
+        if (hop !== undefined) {
+            hop.responseHeaders = headers;
+            if (setCookies.length > 0) {
+                hop.setCookies = setCookies;
+            }
+        }
         if (setCookies.length > 0) {
-            this.#responseSetCookies[requestId] = setCookies;
+            // Accumulate rather than overwrite: a redirect chain shares one request id
+            // and each hop may set its own cookies.
+            const accumulated = this.#responseSetCookies[requestId] ?? [];
+            accumulated.push(...setCookies);
+            this.#responseSetCookies[requestId] = accumulated;
         }
     }
     // CDP joins multiple `Set-Cookie` response headers into a single value
@@ -307,17 +428,39 @@ export class RequestMetadataTracker {
             }
             return entry;
         };
-        // Responses that set a cookie via `Set-Cookie` (keyed by the request they
-        // answered, whose URL is the setter's URL).
+        // Responses that set a cookie via `Set-Cookie`. Attributed to the specific
+        // hop that sent the header, not to the request id's final URL.
         for (const [requestId, setCookies] of Object.entries(this.#responseSetCookies)) {
             if (setCookies === undefined) {
                 continue;
             }
-            const url = this.#requestInfo[requestId]?.url;
+            const hops = this.#hopsByRequest[requestId];
+            // Cookies we could place on a hop, so the fallback below only covers the
+            // rest (e.g. a response whose request never produced a
+            // `requestWillBeSent`, such as one served from cache).
+            const attributed = new Set();
+            if (hops !== undefined) {
+                hops.forEach((hop, hopIndex) => {
+                    for (const cookie of hop.setCookies ?? []) {
+                        attributed.add(cookie);
+                        entryFor(cookie.key).setBy.push({
+                            requestId,
+                            url: hop.url,
+                            value: cookie.value,
+                            hopIndex,
+                            hopStatus: hop.status,
+                        });
+                    }
+                });
+            }
+            const fallbackUrl = this.#requestInfo[requestId]?.url;
             for (const cookie of setCookies) {
+                if (attributed.has(cookie)) {
+                    continue;
+                }
                 entryFor(cookie.key).setBy.push({
                     requestId,
-                    url,
+                    url: fallbackUrl,
                     value: cookie.value,
                 });
             }

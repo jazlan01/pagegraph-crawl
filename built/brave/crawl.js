@@ -3,13 +3,14 @@ import * as osLib from "os";
 import { resolve } from "node:path";
 import { harFromMessages } from "chrome-har";
 import Xvbf from "xvfb";
+import { BodyLog } from "./body_log.js";
 import { isTopLevelPageNavigation, isTimeoutError } from "./checks.js";
 import { asHTTPUrl } from "./checks.js";
 import { DebugStackTracker } from "./debug_stack_tracker.js";
-import { createScreenshotPath, deleteAtPath } from "./files.js";
+import { compressAtPath, createBodiesPath, createScreenshotPath, deleteAtPath, } from "./files.js";
 import { writeGraphML, recoverPartialGraphML, cleanupEventLogs, } from "./files.js";
 import { writeHAR, writeHeadersLog, writeStacks } from "./files.js";
-import { writeCookies, writeCookieNetwork } from "./files.js";
+import { writeCookies, writeCookieNetwork, writeRedirects } from "./files.js";
 import { getLogger } from "./logging.js";
 import { makeNavigationTracker } from "./navigation_tracker.js";
 import { selectRandomChildUrl } from "./page.js";
@@ -198,7 +199,19 @@ export const doCrawl = async (args, previouslySeenUrls) => {
             if (args.userAgent !== undefined) {
                 await page.setUserAgent(args.userAgent);
             }
-            const metadataTracker = new RequestMetadataTracker(logger);
+            // Bodies are streamed to their sidecar as they are observed, so the log has
+            // to exist before the tracker that feeds it.
+            let bodyLog;
+            if (args.saveBodies) {
+                bodyLog = new BodyLog({
+                    path: createBodiesPath(args, urlToCrawl),
+                    bodyMax: args.bodyMax,
+                    budgetBytes: args.bodiesBudgetMb * 1024 * 1024,
+                    allMimeTypes: args.saveBodiesFull,
+                }, logger);
+                logger.info("Recording request/response bodies to: ", bodyLog.path);
+            }
+            const metadataTracker = new RequestMetadataTracker(logger, false, bodyLog);
             // Subscribe to the CDP *ExtraInfo events, which carry the raw Cookie
             // (outgoing) and Set-Cookie (incoming) headers that puppeteer strips.
             // These are non-pausing. Network is already enabled when storing a HAR;
@@ -307,9 +320,28 @@ export const doCrawl = async (args, previouslySeenUrls) => {
                 // which responses set it). Written here, before graph generation, so it
                 // survives a graph-gen crash just like the cookie inventory.
                 await writeCookieNetwork(args, urlToCrawl, metadataTracker.toCookieNetworkJSON(), logger);
+                // Per-hop detail of every redirect chain (status, Location, Set-Cookie).
+                // The graph's request edges have nowhere to hold this, and it is where
+                // cookie-syncing over redirects is visible.
+                await writeRedirects(args, urlToCrawl, metadataTracker.toRedirectChainsJSON(), logger);
             }
             if (args.debugStacks && stackTracker) {
                 await writeStacks(args, urlToCrawl, JSON.stringify(stackTracker.getRecords(), null, 2), logger);
+            }
+            // Close the body log before graph generation, for the same reason the
+            // cookie sidecars are written here: a SIGABRT during generatePageGraph must
+            // not cost us the sidecar. Each NDJSON line is already durable, so this
+            // only flushes the tail and (optionally) compresses.
+            if (bodyLog !== undefined) {
+                await bodyLog.close();
+                const stats = bodyLog.getStats();
+                logger.info("Recorded bodies: ", `${String(stats.bodiesStored)} of ${String(stats.records)} records, ` +
+                    `${String(stats.bytesStored)} bytes, ` +
+                    `${String(stats.truncated)} truncated, dropped ` +
+                    JSON.stringify(stats.dropped));
+                if (args.compress) {
+                    await compressAtPath(bodyLog.path);
+                }
             }
             // Graph generation can abort the renderer (SIGABRT) on very large pages.
             // The cookie sidecars above are already on disk, and the rebuilt renderer

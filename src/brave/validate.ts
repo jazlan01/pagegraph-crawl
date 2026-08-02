@@ -40,7 +40,7 @@ const guessBinary = (): string | boolean => {
   return false;
 };
 
-export const validate = (rawArgs: any): ValidationResult => {  // eslint-disable-line
+export const validate = (rawArgs: any): ValidationResult => {
   const logger = getLoggerForLevel(rawArgs.logging);
   logger.info("Received arguments: ", rawArgs);
 
@@ -104,7 +104,21 @@ export const validate = (rawArgs: any): ValidationResult => {  // eslint-disable
   const debugMaxCaptures: number = rawArgs.debug_max_captures;
   const debugMaxValue: number = rawArgs.debug_max_value;
   const saveCookies: boolean = rawArgs.save_cookies;
+  const saveBodies: boolean = rawArgs.save_bodies;
+  const saveBodiesFull: boolean = rawArgs.save_bodies_full;
+  const bodyMax: number = rawArgs.body_max;
+  const bodiesBudgetMb: number = rawArgs.bodies_budget_mb;
   const recordingEventLog: boolean = rawArgs.recording_event_log;
+
+  if (bodyMax < 0) {
+    return [false, `--body-max must not be negative: ${String(bodyMax)}`];
+  }
+  if (bodiesBudgetMb < 0) {
+    return [
+      false,
+      `--bodies-budget-mb must not be negative: ${String(bodiesBudgetMb)}`,
+    ];
+  }
   const validatedArgs: CrawlArgs = {
     executablePath: String(executablePath),
     outputPath,
@@ -132,6 +146,10 @@ export const validate = (rawArgs: any): ValidationResult => {  // eslint-disable
     debugMaxCaptures,
     debugMaxValue,
     saveCookies,
+    saveBodies,
+    saveBodiesFull,
+    bodyMax,
+    bodiesBudgetMb,
     recordingEventLog,
   };
 

@@ -416,6 +416,34 @@ export const writeCookieNetwork = async (
   }
 };
 
+const createRedirectsPath = (args: CrawlArgs, url: URL): FilePath => {
+  const extension = args.compress ? ".redirects.json.gz" : ".redirects.json";
+  return join(createOutputPath(args, url) + extension);
+};
+
+export const writeRedirects = async (
+  args: CrawlArgs,
+  url: URL,
+  redirectsJSON: string,
+  logger: Logger,
+): Promise<undefined> => {
+  try {
+    const outputFilename = createRedirectsPath(args, url);
+    logger.info("Writing redirect chains to: ", outputFilename);
+    const data = args.compress ? gzipSync(redirectsJSON) : redirectsJSON;
+    await writeFile(outputFilename, data);
+  } catch (err) {
+    logger.error("saving redirect chains file: ", String(err));
+  }
+};
+
+// The body sidecar is written incrementally by `BodyLog` as the crawl runs, so
+// unlike the other sidecars there is no one-shot writer here — only the path.
+// Compression happens after the log is closed, via `compressAtPath`.
+export const createBodiesPath = (args: CrawlArgs, url: URL): FilePath => {
+  return join(createOutputPath(args, url) + ".bodies.ndjson");
+};
+
 export const deleteAtPath = async (path: FilePath): Promise<undefined> => {
   await rm(path, {
     recursive: true,

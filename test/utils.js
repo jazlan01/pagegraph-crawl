@@ -115,11 +115,98 @@ export const startServer = (port = 8080, debug = false) => {
 export const setCookieName = 'server-cookie'
 export const setCookieValue = 'srvval-91237'
 
+// A cookie set on an intermediate 302 hop. Tests assert this survives into the
+// graph, which proves per-hop response metadata is no longer collapsed to the
+// last hop of a redirect chain.
+export const hopCookieName = 'hop-cookie'
+export const hopCookieValue = 'hopval-91238'
+
+// The identifier page-post-message.js hands to every postMessage surface.
+export const postMessageSyncId = 'pmsync-91241-zzz'
+
+// The cookie value that page-cookie-exfil.js leaks in request bodies only. Kept
+// here so the fixture and its assertions cannot drift apart.
+export const exfilCookieName = 'exfil-cookie'
+export const exfilCookieValue = 'exval-91239-abcdef'
+
+// A second cookie, set on the SECOND hop. With last-wins per-request-id storage
+// only one of the two survives, so asserting on both proves hops accumulate.
+export const hop2CookieName = 'hop2-cookie'
+export const hop2CookieValue = 'hopval-91240'
+
 export const startSetCookieServer = (port = 8081, debug = false) => {
   const server = createServer((req, res) => {
     if (debug) {
-      console.log(`Set-Cookie server request: ${req.url}`)
+      console.log(`Set-Cookie server request: ${req.method} ${req.url}`)
     }
+
+    // The exfiltration sink. Answers any method, sets no cookie, and permits
+    // cross-origin POSTs so the fixture's fetch/sendBeacon actually leave the
+    // browser (the fixture is served from a different port, so this is a
+    // cross-origin request and would otherwise be blocked at preflight).
+    if (req.url.startsWith('/collect')) {
+      const corsHeaders = {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
+        'Access-Control-Allow-Headers': 'content-type'
+      }
+      if (req.method === 'OPTIONS') {
+        res.writeHead(204, corsHeaders)
+        res.end()
+        return
+      }
+      // Drain the body so the request completes.
+      req.on('data', (chunk) => {
+        if (debug) {
+          console.log(`  /collect body chunk: ${chunk.toString()}`)
+        }
+      })
+      req.on('end', () => {
+        res.writeHead(200, { ...corsHeaders, 'Content-Type': 'application/json' })
+        res.end('{"ok":true}')
+      })
+      return
+    }
+
+    // A real HTTP redirect chain: /hop1 -> /hop2 -> /final, with a Set-Cookie on
+    // the FIRST hop. All three hops share one CDP request id, which is what makes
+    // this different from the JS-redirect fixtures (those are separate
+    // navigations) and what exercises per-hop metadata retention.
+    if (req.url.startsWith('/hop1')) {
+      res.writeHead(302, {
+        Location: '/hop2',
+        'Access-Control-Allow-Origin': '*',
+        'Set-Cookie': `${hopCookieName}=${hopCookieValue}; Path=/`
+      })
+      res.end()
+      return
+    }
+    if (req.url.startsWith('/hop2')) {
+      res.writeHead(302, {
+        Location: '/final',
+        'Access-Control-Allow-Origin': '*',
+        'Set-Cookie': `${hop2CookieName}=${hop2CookieValue}; Path=/`
+      })
+      res.end()
+      return
+    }
+    if (req.url.startsWith('/final')) {
+      // A 1x1 transparent GIF, so the chain can be driven by an <img> — which is
+      // not subject to CORS, so the redirect is actually followed rather than
+      // blocked at the first hop.
+      const gif = Buffer.from(
+        'R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7',
+        'base64'
+      )
+      res.writeHead(200, {
+        'Content-Type': 'image/gif',
+        'Access-Control-Allow-Origin': '*',
+        'Content-Length': gif.length
+      })
+      res.end(gif)
+      return
+    }
+
     res.writeHead(200, {
       'Content-Type': 'text/html',
       'Set-Cookie': `${setCookieName}=${setCookieValue}; Path=/`

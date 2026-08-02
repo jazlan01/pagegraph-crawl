@@ -37,6 +37,10 @@ interface CrawlArgs {
   debugMaxCaptures: number;
   debugMaxValue: number;
   saveCookies: boolean;
+  saveBodies: boolean;
+  saveBodiesFull: boolean;
+  bodyMax: number;
+  bodiesBudgetMb: number;
   recordingEventLog: boolean;
 }
 

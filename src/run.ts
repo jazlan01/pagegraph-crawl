@@ -191,6 +191,44 @@ parser.add_argument("--save-cookies", {
   dest: "save_cookies",
   default: false,
 });
+parser.add_argument("--no-save-bodies", {
+  help:
+    "Do not record HTTP request/response bodies. Bodies are captured by default " +
+    "to a <output>.bodies.ndjson sidecar, joinable to the graph by request id, " +
+    "because PageGraph records only a body's size and so cannot show a value " +
+    "leaving the page in a POST. Pass this to skip them on disk-constrained runs.",
+  action: "store_false",
+  dest: "save_bodies",
+  default: true,
+});
+parser.add_argument("--save-bodies-full", {
+  help:
+    "Keep every response body, not just textual ones. By default response " +
+    "bodies are limited to text/JSON/JS/XML content types, since image, font, " +
+    "video and audio bytes cannot carry a leaked identifier and would dominate " +
+    "the sidecar. Request bodies are always kept regardless of this flag.",
+  action: "store_true",
+  dest: "save_bodies_full",
+  default: false,
+});
+parser.add_argument("--body-max", {
+  help:
+    "Maximum bytes stored per body; longer bodies are truncated and marked. The " +
+    "full body's size and SHA-256 are always recorded, so truncation does not " +
+    "break identity joins. Default 65536.",
+  type: "int",
+  dest: "body_max",
+  default: 65536,
+});
+parser.add_argument("--bodies-budget-mb", {
+  help:
+    "Total megabytes of body content to store for the whole crawl. Once spent, " +
+    "records keep their metadata and hash but omit content, so the accounting " +
+    "stays explicit rather than silently truncating coverage. Default 512.",
+  type: "int",
+  dest: "bodies_budget_mb",
+  default: 512,
+});
 parser.add_argument("--recording-event-log", {
   help:
     "Write a durable GraphML event log to the output dir as PageGraph records " +
