@@ -96,7 +96,7 @@ const makePuppeteerConf = async (args: CrawlArgs): Promise<PuppeteerConfig> => {
   // durable per-item GraphML event log to the same dir as it records. This is
   // the only thing that survives a *recording-time* crash (before ToGraphML
   // runs); left unset, the renderer never opens the log and normal crawls pay
-  // nothing. See recoverPartialGraphML / findEventLog in files.ts.
+  // nothing. See recoverPartialGraphML in files.ts.
   if (args.recordingEventLog) {
     process.env.PAGEGRAPH_EVENT_LOG_DIR = resolve(args.outputPath);
   } else {
@@ -228,8 +228,12 @@ export const launchWithRetry = async (
 
   // const puppeteerLib = makeLaunchPuppeteerFunc(stealthMode, logger)
 
+  // `return await` (not `return`) is load-bearing here: launch() returns a
+  // promise, and returning it un-awaited hands any rejection straight to the
+  // caller without ever entering the catch — which made every retry below
+  // dead code and turned any transient launch failure into a fatal one.
   try {
-    return puppeteerLib.launch(launchOptions);
+    return await puppeteerLib.launch(launchOptions);
   } catch (err) {
     logger.info("Failed to launch: ", err, ". ", retries, " left…");
   }
@@ -237,7 +241,7 @@ export const launchWithRetry = async (
   for (let i = 1; i <= retries; ++i) {
     await asyncSleep(computeTimeout(i));
     try {
-      return puppeteerLib.launch(launchOptions);
+      return await puppeteerLib.launch(launchOptions);
     } catch (err) {
       logger.info("Failed to launch: ", err, ". ", retries - i, " left…");
     }

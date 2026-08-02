@@ -8,7 +8,7 @@ import { isTopLevelPageNavigation, isTimeoutError } from "./checks.js";
 import { asHTTPUrl } from "./checks.js";
 import { DebugStackTracker } from "./debug_stack_tracker.js";
 import { compressAtPath, createBodiesPath, createScreenshotPath, deleteAtPath, } from "./files.js";
-import { writeGraphML, recoverPartialGraphML, cleanupEventLogs, } from "./files.js";
+import { writeGraphML, recoverPartialGraphML, cleanupEventLogs, snapshotRendererOutputs, writeCrawlStatus, } from "./files.js";
 import { writeHAR, writeHeadersLog, writeStacks } from "./files.js";
 import { writeCookies, writeCookieNetwork, writeRedirects } from "./files.js";
 import { getLogger } from "./logging.js";
@@ -62,7 +62,35 @@ const waitUntilUnless = (secs, unlessFunc, intervalMs = 500) => {
         }, intervalMs);
     });
 };
-const prepareHARGenerator = async (client, networkEvents, pageEvents, storeHarBody, responseBodies, logger) => {
+// Awaits `promise` but gives up after `ms`, logging instead of hanging or
+// throwing. For teardown calls (page.close, browser.close) against a wedged
+// or crashed renderer: those can block forever, and a crawl that hangs in
+// cleanup is worse than one that leaves a zombie process — nothing downstream
+// (recovery, sidecars, the next URL) ever runs. Rejections are swallowed into
+// the log for the same reason: teardown failure must never mask crawl output.
+const bestEffort = async (promise, ms, label, logger) => {
+    let timer;
+    const guarded = promise.then(() => true, (err) => {
+        logger.error(`${label} failed: `, String(err));
+        return false;
+    });
+    const timeout = new Promise((resolve) => {
+        timer = setTimeout(() => {
+            logger.error(`${label} timed out after ${String(ms)}ms; continuing`);
+            resolve(false);
+        }, ms);
+    });
+    try {
+        await Promise.race([guarded, timeout]);
+    }
+    finally {
+        clearTimeout(timer);
+    }
+};
+const prepareHARGenerator = async (client, networkEvents, pageEvents, storeHarBody, responseBodies, 
+// Every in-flight Network.getResponseBody call, so the HAR export can wait
+// for the fetches to actually settle before reading `responseBodies`.
+pendingBodyFetches, logger) => {
     await client.send("Page.enable");
     await client.send("Network.enable");
     const networkMethods = [
@@ -87,11 +115,11 @@ const prepareHARGenerator = async (client, networkEvents, pageEvents, storeHarBo
             if (storeHarBody && method == "Network.loadingFinished") {
                 const responseParams = params;
                 const requestId = responseParams.requestId;
-                client.send("Network.getResponseBody", { requestId: requestId }).then((responseBody) => {
+                pendingBodyFetches.push(client.send("Network.getResponseBody", { requestId: requestId }).then((responseBody) => {
                     responseBodies.set(requestId, responseBody);
                 }, (reason) => {
                     logger.error("LoadingFinishedError: " + String(reason));
-                });
+                }));
             }
         });
     });
@@ -157,7 +185,8 @@ export const doCrawl = async (args, previouslySeenUrls) => {
             logger.info("Closing ", pages.length, " pages that are already open.");
             for (const aPage of pages) {
                 logger.info("  - closing tab with url ", aPage.url());
-                await aPage.close();
+                // A wedged pre-open tab must not abort the crawl before it starts.
+                await bestEffort(aPage.close(), 15_000, "pre-open tab close", logger);
             }
         }
         try {
@@ -184,9 +213,16 @@ export const doCrawl = async (args, previouslySeenUrls) => {
             const networkEvents = [];
             const pageEvents = [];
             const responseBodies = new Map();
+            const pendingBodyFetches = [];
             if (args.storeHar) {
-                await prepareHARGenerator(client, networkEvents, pageEvents, args.storeHarBody, responseBodies, logger);
+                await prepareHARGenerator(client, networkEvents, pageEvents, args.storeHarBody, responseBodies, pendingBodyFetches, logger);
             }
+            // Throwing here would escape through puppeteer's event emitter as an
+            // uncaught exception and take down the whole node process — losing the
+            // sidecars and the partial-graph recovery that are the entire point of
+            // surviving a renderer crash. Record the crash, cut the dwell short, and
+            // let the normal flow write what it still can before recovery runs.
+            let targetCrashedStatus;
             client.on("Target.targetCrashed", (event) => {
                 const logMsg = {
                     targetId: event.targetId,
@@ -194,7 +230,8 @@ export const doCrawl = async (args, previouslySeenUrls) => {
                     errorCode: event.errorCode,
                 };
                 logger.error(`Target.targetCrashed ${JSON.stringify(logMsg)}`);
-                throw new Error(event.status);
+                targetCrashedStatus = `${event.status} (code ${String(event.errorCode)})`;
+                shouldStopWaitingFlag = true;
             });
             if (args.userAgent !== undefined) {
                 await page.setUserAgent(args.userAgent);
@@ -285,8 +322,23 @@ export const doCrawl = async (args, previouslySeenUrls) => {
                 }
             });
             page.on("response", async (response) => {
-                await metadataTracker.addMetadataFromResponse(response);
+                // Same rationale as the request handler above: a metadata failure
+                // (e.g. an unrecognized request-id format, which throws) must degrade
+                // to a missing header record, not become an unhandled rejection that
+                // kills the whole crawl.
+                try {
+                    await metadataTracker.addMetadataFromResponse(response);
+                }
+                catch (err) {
+                    logger.verbose("Response handler error: ", String(err));
+                }
             });
+            // Snapshot the renderer-output files (streamed graphs, event logs)
+            // already sitting in the output dir before our page navigates. Anything
+            // in this snapshot was written by a renderer that is not our page —
+            // Brave's pre-open tabs, the New Tab Page, previous runs — and recovery
+            // must never mistake it for our graph.
+            const rendererSnapshot = await snapshotRendererOutputs(resolve(args.outputPath), logger);
             logger.info("Navigating to ", urlToCrawl);
             try {
                 await page.goto(urlToCrawl, { waitUntil: "domcontentloaded" });
@@ -308,7 +360,14 @@ export const doCrawl = async (args, previouslySeenUrls) => {
             // teardown — a renderer paused at a breakpoint cannot run
             // Page.generatePageGraph, and closing it mid-pause throws.
             if (stackTracker) {
-                await stackTracker.disable();
+                // Best-effort: with a crashed renderer the Debugger domain is gone and
+                // disable() can reject; that must not skip the sidecar writes below.
+                try {
+                    await stackTracker.disable();
+                }
+                catch (err) {
+                    logger.error("detaching debugger: ", String(err));
+                }
             }
             // Dump the cookie inventory NOW, while the renderer is alive and before
             // graph generation. Page.generatePageGraph can abort the renderer
@@ -343,37 +402,87 @@ export const doCrawl = async (args, previouslySeenUrls) => {
                     await compressAtPath(bodyLog.path);
                 }
             }
+            // The headers log is built purely from already-collected request
+            // metadata, so write it BEFORE graph generation: it used to be written
+            // only after a successful generatePageGraph, which meant a graph-gen
+            // crash silently cost the headers sidecar too.
+            if (args.saveRequestHeaders) {
+                await writeHeadersLog(args, urlToCrawl, metadataTracker.toJSON(), logger);
+            }
             // Graph generation can abort the renderer (SIGABRT) on very large pages.
-            // The cookie sidecars above are already on disk, and the rebuilt renderer
+            // The sidecars above are already on disk, and the rebuilt renderer
             // streams the graphml incrementally, so a crash here still leaves a valid
             // GraphML prefix on disk. Capture whether we produced a graph; if the CDP
             // call rejects (renderer died) or writeGraphML yields nothing, fall back
-            // to recovering + tail-repairing that partial streamed file.
+            // to recovering + tail-repairing whatever renderer output survived.
             let graphmlPath = null;
+            let generateError;
+            let recoveredExtras = [];
+            let recoverySource;
             try {
-                const response = await generatePageGraph(client, logger);
-                if (args.saveRequestHeaders) {
-                    await writeHeadersLog(args, urlToCrawl, metadataTracker.toJSON(), logger);
+                if (targetCrashedStatus !== undefined) {
+                    // The renderer is already gone; calling generatePageGraph would only
+                    // burn time waiting for a CDP error. Go straight to recovery.
+                    throw new Error(`target crashed earlier: ${targetCrashedStatus}`);
                 }
+                const response = await generatePageGraph(client, logger);
                 graphmlPath = await writeGraphML(args, urlToCrawl, response, metadataTracker, logger);
             }
             catch (err) {
-                logger.error("generatePageGraph failed; attempting partial-graph recovery: ", String(err));
+                generateError = String(err);
+                logger.error("generatePageGraph failed; attempting partial-graph recovery: ", generateError);
             }
+            const graphWasComplete = graphmlPath !== null;
             if (graphmlPath === null) {
-                graphmlPath = await recoverPartialGraphML(args, urlToCrawl, metadataTracker, logger);
-                if (graphmlPath === null) {
+                // Stop every renderer we own before scavenging their output: recovery
+                // truncates, footers, and finally deletes candidate files, and must
+                // never touch one a live renderer is still appending to (observed on a
+                // redirect-chain crawl, where the next hop's document was still
+                // recording into its event log). Best-effort — the renderer may
+                // already be dead.
+                if (!page.isClosed()) {
+                    await bestEffort(page.close(), 15_000, "pre-recovery page.close", logger);
+                }
+                const recoveredGraphs = await recoverPartialGraphML(args, urlToCrawl, metadataTracker, logger, rendererSnapshot);
+                if (recoveredGraphs === null) {
                     logger.error("no graph could be recovered for: ", String(urlToCrawl));
+                }
+                else {
+                    graphmlPath = recoveredGraphs.primary;
+                    recoveredExtras = recoveredGraphs.all.slice(1);
+                    recoverySource = recoveredGraphs.sourceKind;
                 }
             }
             else if (args.recordingEventLog) {
                 // generatePageGraph succeeded, so any Tier C event log is redundant.
                 await cleanupEventLogs(resolve(args.outputPath), logger);
             }
+            // Record the completeness verdict where downstream tooling can check it,
+            // so a partial (or absent) graph is never silently mistaken for a
+            // complete capture.
+            const crawlStatus = {
+                url: String(urlToCrawl),
+                finishedAt: new Date().toISOString(),
+                graphStatus: graphWasComplete
+                    ? "complete"
+                    : graphmlPath !== null
+                        ? "partial"
+                        : "none",
+                graphPath: graphmlPath,
+                additionalGraphPaths: recoveredExtras,
+                recoverySource,
+                generateError,
+                targetCrashed: targetCrashedStatus,
+            };
+            await writeCrawlStatus(args, urlToCrawl, crawlStatus, logger);
             // Store HAR
             if (args.storeHar) {
                 logger.verbose("Beginning HAR export");
-                await Promise.all(responseBodies);
+                // Wait for the in-flight Network.getResponseBody fetches to settle so
+                // late bodies land in `responseBodies` before we read it. (The old
+                // `Promise.all(responseBodies)` awaited the Map's [key, value] entries
+                // — a no-op that could silently drop still-loading bodies.)
+                await Promise.allSettled(pendingBodyFetches);
                 for (const event of networkEvents) {
                     if (!args.storeHarBody) {
                         break;
@@ -400,24 +509,37 @@ export const doCrawl = async (args, previouslySeenUrls) => {
                 });
                 await writeHAR(args, urlToCrawl, har, logger);
             }
+            // The page may already be closed (recovery closes it to quiesce the
+            // renderers before scavenging their files); anything below that needs a
+            // live page is then skipped rather than thrown.
             if (depth > 1) {
-                randomChildUrl = await selectRandomChildUrl(page, logger);
+                if (page.isClosed()) {
+                    logger.info("Page already closed; skipping child-link selection");
+                }
+                else {
+                    randomChildUrl = await selectRandomChildUrl(page, logger);
+                }
             }
             logger.info("Closing page");
-            if (args.screenshot) {
+            if (args.screenshot && !page.isClosed()) {
                 const screenshotPath = createScreenshotPath(args, urlToCrawl);
                 logger.info(`About to write screenshot to ${screenshotPath}`);
                 await page.screenshot({ type: "png", path: screenshotPath });
                 logger.info("Screenshot recorded");
             }
-            await page.close();
+            if (!page.isClosed()) {
+                await bestEffort(page.close(), 15_000, "page.close", logger);
+            }
         }
         catch (err) {
             logger.info("ERROR runtime fiasco from browser/page:", err);
         }
         finally {
             logger.info("Closing the browser");
-            await browser.close();
+            // Time-bounded: browser.close() against a wedged renderer can hang
+            // forever, and a crawl stuck in teardown never reaches the redirect /
+            // recursive-child crawls queued below.
+            await bestEffort(browser.close(), 30_000, "browser.close", logger);
         }
     }
     catch (err) {
