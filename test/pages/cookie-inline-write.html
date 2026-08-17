@@ -1,0 +1,29 @@
+<html>
+
+<body>
+<!--
+  Two inline scripts, both writing a cookie. Inline writes are the case where a
+  breakpoint target cannot be built from a script URL: every inline script in a
+  document shares the document's URL, so a URL+offset spec is ambiguous by
+  construction. The decoy runs first and writes a DIFFERENT cookie, so a target
+  that resolves its offset against the wrong inline script lands here and the
+  mistake is visible rather than plausible.
+-->
+<script>
+  // decoy: same URL as the real target, different cookie, different length
+  const decoyId = 'decoy-' + (1234).toString(16)
+  document.cookie = 'inline-decoy=' + decoyId
+</script>
+
+<script>
+  // the real target: the plaintext exists only as a local, the cookie gets a hash
+  const plaintext = 'inline-secret-98765'
+  let h = 0
+  for (const ch of plaintext) h = ((h << 5) - h + ch.charCodeAt(0)) | 0
+  const hashed = (h >>> 0).toString(16)
+  document.cookie = 'inline-cookie=' + hashed
+</script>
+
+</body>
+
+</html>

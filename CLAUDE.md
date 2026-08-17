@@ -146,6 +146,51 @@ per-cookie lifecycle/provenance audit:
   JS call stacks on cookie-write edges; `--debug-breakpoint`/`--debug-encoding` pause at write sites
   to recover pre-encryption values (pass 2 for hand-rolled-crypto cookies). Caps: `--debug-max-captures`,
   `--debug-max-value`. **Never `--debug-native`** — arming native breakpoints SIGTRAPs the renderer.
+- **Probe mode (pass 2)** — `--probe` runs the debug harness on a **stock** Brave/Chromium: PageGraph
+  is not enabled (`puppeteer.ts` gates the `--enable-features=PageGraph` push) and no graphml is
+  produced, so the SIGTRAP/recording-crash hazards of a PageGraph build do not apply and pass 2 costs
+  seconds. It exists to recover values a site transforms before any recorded boundary — pass 1's
+  `script position` says exactly where, so pausing there reads the pre-image out of the call frame.
+  Output is `<base>.probe.json` (distinct from a pass-1 `.stacks.json`) and carries its own caveat:
+  **pass 2 is a separate page load**, so a value embedding time or randomness is *a* pre-transform
+  value, not *the* one in the graph. Targets come from `--probe-targets <file>`
+  (`analysis/plan-probe-targets.mjs`) or bare `--debug-breakpoint` specs.
+  - **Offsets are armed from a `beforeScriptExecution` instrumentation pause, not from
+    `Debugger.scriptParsed`.** scriptParsed does not hold execution, so a script that writes its
+    cookie at load finishes before the async `setBreakpoint` round-trip lands — the probe then
+    reports a clean run with zero captures. Arming from both races and the parsed path wins, so
+    when the pause is active it owns arming (`#instrumentationPauseActive`).
+  - **Inline `<script>` writes are targetable.** Every inline script in a document shares the
+    document's URL, so a URL+offset spec is ambiguous — and an offset valid for one inline script
+    is often in range for another, landing in unrelated code. Targets therefore carry
+    `requirePrecedingSource: "document.cookie"`, checked at arm time against the parsed bytes, which
+    identifies the intended script by content and needs nothing from pass 1. Two further facts,
+    both verified against `test/pages/cookie-inline-write.html` (a decoy inline script writing a
+    different cookie, so a mis-resolution lands somewhere visible): PageGraph's inline
+    `script position` is relative to **the inline script's own source**, while CDP addresses inline
+    breakpoints in **document coordinates** — so `scriptParsed`'s `startLine`/`startColumn` must be
+    added or `setBreakpoint` answers "Could not resolve breakpoint".
+  - **`script` and `module` scopes are captured** (only `global` and `with` are skipped). A
+    top-level `const` in a classic inline script is a *script*-scope binding, so skipping that scope
+    made every top-level inline write record a correct pause with an empty scope chain — a silent
+    hole in pass 1 as much as in probe mode.
+  - Three target lists, so an absent value always has a stated reason: `armedTargets` (with the
+    SHA-256 actually armed against), `skippedTargets` (pass-1 hash mismatch — the offset would land
+    in unrelated code), `neverParsedTargets` (**the script never loaded**; usually a content blocker
+    in the pass-2 browser — stock Brave's shields, an extension, or a filtering DNS blocks precisely
+    the tracker scripts a probe targets).
+  - `expectedSha256` (from `--src`, a dump of the loaded source) is **enforced**;
+    `pass1ResponseSha256` (from `.bodies.ndjson`) is advisory only — a response body and a parsed
+    source can legitimately differ, so enforcing it would skip good targets.
+  - **`analysis/plan-probe-targets.mjs`** derives the plan from a crawl dir, delegating decode and
+    write-site resolution to the existing tools. It excludes **server-issued bot-defence tokens**
+    behaviourally (no vendor names): a value echoed in an earlier response body was minted by the
+    server, not computed by the page. Skips report **two independent axes** — `setChannel`
+    (`js` / `set-cookie-header` / `not recorded`) and `valueEchoedByServer` — because they overlap:
+    a first-match-wins single reason made "no JS write site" and "server-issued" look mutually
+    exclusive when most header-set cookies are both. That check is **positive-evidence only** — bodies are
+    truncated and textual-only and some XHR responses are never captured — so it never clears a
+    cookie, every target carries `reviewBeforeProbing`, and the list is meant to be read first.
 - **Consent crawling**: `--extensions-path <dir>` loads an unpacked extension (adds
   `--disable-extensions-except`/`--load-extension`). Used to load Consent-O-Matic (patched to accept-all)
   so the full post-consent tracker cookie set fires — see the `consent-o-matic-crawl` auto-memory.
