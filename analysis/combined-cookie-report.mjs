@@ -269,6 +269,15 @@ const sendSite = (s) => `<div class="cs-site cs-sendsite">` +
   `<a class="cs-url" href="${escAttr(s.scriptUrl)}" title="${escAttr(s.scriptUrl)}" target="_blank" rel="noopener">${esc(shortUrl(s.scriptUrl))}</a>` +
   `<span class="cs-loc">:${s.line ?? "?"}:${s.col ?? "?"}</span>${s.inline ? ` <span class="cs-inline">inline</span>` : ""}</div>` +
   codeExcerpt(s) + codeStack(s.stack) + `</div>`;
+// An INFERRED read site — the cookie name was recovered by an LLM reading the code at a jar read, not
+// from a structural graph edge. Styled distinctly (dashed) and labelled "inferred" so it is never
+// mistaken for observed truth.
+const readSite = (s) => `<div class="cs-site cs-readsite">` +
+  `<div class="cs-hd"><span class="cs-what cs-reads">reads</span> ` +
+  `<a class="cs-url" href="${escAttr(s.scriptUrl)}" title="${escAttr(s.scriptUrl)}" target="_blank" rel="noopener">${esc(shortUrl(s.scriptUrl))}</a>` +
+  `<span class="cs-loc">:${s.line ?? "?"}:${s.col ?? "?"}</span>${s.inline ? ` <span class="cs-inline">inline</span>` : ""} ` +
+  `<span class="cs-inferred" title="Recovered by reading the code at the read site — inference, not a graph edge.">inferred${s.confidence ? ` · ${esc(s.confidence)}` : ""}</span></div>` +
+  codeExcerpt(s) + (s.reasoning ? `<div class="cs-reason">${esc(s.reasoning)}</div>` : "") + `</div>`;
 const codeEvidence = (cs) => {
   if (!cs) return "";
   const w = (cs.writes || []).slice(0, 4).map((s) => codeSite(s, "writes"));
@@ -277,13 +286,19 @@ const codeEvidence = (cs) => {
   const seen = new Set();
   const sh = sends.filter((s) => { const k = `${s.destUrl}|${s.scriptUrl}|${s.line}`; if (seen.has(k)) return false; seen.add(k); return true; })
     .slice(0, 4).map(sendSite);
-  const r = (cs.reads || []).slice(0, 3).map((s) => codeSite(s, "reads"));
+  const resolved = cs.resolvedReads || [];
+  const namedReads = resolved.filter((s) => s.scope === "named" && !s.jarWide);
+  const rseen = new Set();
+  const rd = namedReads.filter((s) => { const k = `${s.scriptUrl}|${s.line}`; if (rseen.has(k)) return false; rseen.add(k); return true; }).slice(0, 4).map(readSite);
   const d = (cs.deletes || []).slice(0, 2).map((s) => codeSite(s, "deletes"));
-  const all = [...w, ...sh, ...r, ...d];
-  if (!all.length) return "";
-  // Reads of document.cookie return the WHOLE jar, so PageGraph records them against the jar, not
-  // this cookie — there is no per-cookie read site. The jar-wide readers are in the graph evidence.
-  const readNote = (!r.length) ? `<div class="cs-note">Reads are not shown per-cookie: <code>document.cookie</code> returns the whole jar, so PageGraph records reads against the jar (the reader scripts are under <b>graph evidence &rarr; read edges</b>).</div>` : "";
+  const all = [...w, ...rd, ...sh, ...d];
+  if (!all.length && !resolved.length) return "";
+  // If no read site resolved to a literal cookie name, explain why: document.cookie returns the whole
+  // jar, and this cookie is read via a variable / obfuscated key an LLM could not tie to a literal.
+  const jarWide = resolved.some((s) => s.jarWide || s.scope === "all");
+  const readNote = !rd.length
+    ? `<div class="cs-note">No read site named this cookie by a string literal: <code>document.cookie</code> returns the whole jar and ${jarWide ? "a jar-enumerating script reads every cookie" : "this cookie is read via a variable / obfuscated key"}. Reader scripts are under <b>graph evidence &rarr; read edges</b>.</div>`
+    : "";
   return `<details class="gev code"><summary>source — where it's set, read &amp; sent</summary>${all.join("")}${readNote}</details>`;
 };
 
@@ -399,6 +414,9 @@ td{padding:.6rem .55rem;border-bottom:1px solid var(--line);vertical-align:top}
 .cs-method{font-family:var(--mono);font-size:.72rem;color:var(--muted)}
 .cs-sub{margin-top:.15rem;font-size:.72rem} .cs-from{color:var(--muted);font-size:.7rem;text-transform:uppercase;letter-spacing:.04em}
 .cs-note{font-size:.74rem;color:var(--muted);line-height:1.5;margin:.35rem 0 .1rem;padding:.35rem .5rem;border-left:2px solid var(--line);background:rgba(154,162,184,.05)} .cs-note code{color:var(--pool)}
+.cs-readsite{border-left-style:dashed;border-left-color:var(--sky)}
+.cs-inferred{font-size:.64rem;text-transform:uppercase;letter-spacing:.04em;color:var(--sky);border:1px dashed rgba(99,144,238,.5);border-radius:3px;padding:0 .3rem;margin-left:auto}
+.cs-reason{font-size:.74rem;color:var(--muted);font-style:italic;margin-top:.2rem}
 .cs-url{font-family:var(--mono);font-size:.76rem;color:var(--pool);text-decoration:none;word-break:break-all} .cs-url:hover{text-decoration:underline}
 .cs-loc{font-family:var(--mono);font-size:.76rem;color:var(--gold);font-variant-numeric:tabular-nums}
 .cs-inline,.cs-chan{font-size:.64rem;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);border:1px solid var(--line);border-radius:3px;padding:0 .28rem}
