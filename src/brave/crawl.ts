@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import * as osLib from "os";
 import { resolve } from "node:path";
@@ -319,6 +320,43 @@ export const doCrawl = async (
           // the renderer ran (obfuscated bundles drift vs. an out-of-band fetch).
           saveScriptsDir: args.outputPath,
         });
+        // Probe targets come from a pass-1 crawl and carry the script hash the
+        // offset was computed against; register them before enabling so they
+        // are pending when scripts parse.
+        if (args.probeTargets !== undefined) {
+          try {
+            const parsed: unknown = JSON.parse(
+              readFileSync(args.probeTargets, "utf8"),
+            );
+            const list = Array.isArray(parsed)
+              ? parsed
+              : ((parsed as { targets?: unknown[] }).targets ?? []);
+            const usable = (list as Record<string, unknown>[]).filter(
+              (tgt) =>
+                typeof tgt.urlRegex === "string" &&
+                typeof tgt.offset === "number",
+            );
+            stackTracker.registerTargets(
+              usable as unknown as {
+                urlRegex: string;
+                offset: number;
+                expectedSha256?: string;
+                label?: string;
+              }[],
+            );
+            logger.info(
+              "probe: loaded ",
+              String(usable.length),
+              " target(s) from ",
+              args.probeTargets,
+            );
+          } catch (err) {
+            logger.error(
+              "probe: could not read --probe-targets: ",
+              String(err),
+            );
+          }
+        }
         // Enable before navigation so breakpoints exist when scripts parse.
         await stackTracker.enable(client);
       }
@@ -565,10 +603,48 @@ export const doCrawl = async (
       }
 
       if (args.debugStacks && stackTracker) {
+        const skipped = stackTracker.getSkippedTargets();
+        const unarmed = args.probe ? stackTracker.getUnarmedTargets() : [];
+        const payload = args.probe
+          ? {
+              mode: "probe",
+              // Pass 2 is a SEPARATE page load from the graph that located these
+              // sites. A value containing a timestamp or fresh randomness will
+              // not be the one pass 1 saw, so this captures *a* pre-transform
+              // value, not *the* one in the graph. Travels with the evidence
+              // so the distinction cannot be lost downstream.
+              caveat:
+                "captured on a separate page load from the pass-1 graph; " +
+                "values embedding time or randomness will differ from the " +
+                "graph's, so this is a pre-transform value, not necessarily " +
+                "the exact one recorded in pass 1",
+              url: String(urlToCrawl),
+              capturedAt: new Date().toISOString(),
+              armedTargets: stackTracker.getArmedTargets(),
+              skippedTargets: skipped,
+              neverParsedTargets: unarmed,
+              records: stackTracker.getRecords(),
+            }
+          : stackTracker.getRecords();
+        if (unarmed.length > 0) {
+          logger.error(
+            "probe: ",
+            String(unarmed.length),
+            " target(s) never parsed — the matching script did not load. If " +
+              "this browser blocks trackers, it blocked the probe target.",
+          );
+        }
+        if (skipped.length > 0) {
+          logger.info(
+            "probe: ",
+            String(skipped.length),
+            " target(s) skipped (script changed since pass 1)",
+          );
+        }
         await writeStacks(
           args,
           urlToCrawl,
-          JSON.stringify(stackTracker.getRecords(), null, 2),
+          JSON.stringify(payload, null, 2),
           logger,
         );
       }
@@ -615,60 +691,72 @@ export const doCrawl = async (
       let generateError: string | undefined;
       let recoveredExtras: FilePath[] = [];
       let recoverySource: string | undefined;
-      try {
-        if (targetCrashedStatus !== undefined) {
-          // The renderer is already gone; calling generatePageGraph would only
-          // burn time waiting for a CDP error. Go straight to recovery.
-          throw new Error(`target crashed earlier: ${targetCrashedStatus}`);
-        }
-        const response = await generatePageGraph(client, logger);
-        graphmlPath = await writeGraphML(
-          args,
-          urlToCrawl,
-          response,
-          metadataTracker,
-          logger,
-        );
-      } catch (err) {
-        generateError = String(err);
-        logger.error(
-          "generatePageGraph failed; attempting partial-graph recovery: ",
-          generateError,
-        );
-      }
-      const graphWasComplete = graphmlPath !== null;
-      if (graphmlPath === null) {
-        // Stop every renderer we own before scavenging their output: recovery
-        // truncates, footers, and finally deletes candidate files, and must
-        // never touch one a live renderer is still appending to (observed on a
-        // redirect-chain crawl, where the next hop's document was still
-        // recording into its event log). Best-effort — the renderer may
-        // already be dead.
-        if (!page.isClosed()) {
-          await bestEffort(
-            page.close(),
-            15_000,
-            "pre-recovery page.close",
+      let graphWasComplete = false;
+      // Pass 2 (probe) records no graph: the browser is a stock build with no
+      // PageGraph feature, and this pass's evidence is the paused breakpoint
+      // captures written above. Skipping generation AND its recovery path is
+      // the point of the mode — there is nothing to recover.
+      if (!args.probe) {
+        try {
+          if (targetCrashedStatus !== undefined) {
+            // The renderer is already gone; calling generatePageGraph would only
+            // burn time waiting for a CDP error. Go straight to recovery.
+            throw new Error(`target crashed earlier: ${targetCrashedStatus}`);
+          }
+          const response = await generatePageGraph(client, logger);
+          graphmlPath = await writeGraphML(
+            args,
+            urlToCrawl,
+            response,
+            metadataTracker,
             logger,
           );
+        } catch (err) {
+          generateError = String(err);
+          logger.error(
+            "generatePageGraph failed; attempting partial-graph recovery: ",
+            generateError,
+          );
         }
-        const recoveredGraphs = await recoverPartialGraphML(
-          args,
-          urlToCrawl,
-          metadataTracker,
-          logger,
-          rendererSnapshot,
-        );
-        if (recoveredGraphs === null) {
-          logger.error("no graph could be recovered for: ", String(urlToCrawl));
-        } else {
-          graphmlPath = recoveredGraphs.primary;
-          recoveredExtras = recoveredGraphs.all.slice(1);
-          recoverySource = recoveredGraphs.sourceKind;
+        graphWasComplete = graphmlPath !== null;
+        if (graphmlPath === null) {
+          // Stop every renderer we own before scavenging their output: recovery
+          // truncates, footers, and finally deletes candidate files, and must
+          // never touch one a live renderer is still appending to (observed on a
+          // redirect-chain crawl, where the next hop's document was still
+          // recording into its event log). Best-effort — the renderer may
+          // already be dead.
+          if (!page.isClosed()) {
+            await bestEffort(
+              page.close(),
+              15_000,
+              "pre-recovery page.close",
+              logger,
+            );
+          }
+          const recoveredGraphs = await recoverPartialGraphML(
+            args,
+            urlToCrawl,
+            metadataTracker,
+            logger,
+            rendererSnapshot,
+          );
+          if (recoveredGraphs === null) {
+            logger.error(
+              "no graph could be recovered for: ",
+              String(urlToCrawl),
+            );
+          } else {
+            graphmlPath = recoveredGraphs.primary;
+            recoveredExtras = recoveredGraphs.all.slice(1);
+            recoverySource = recoveredGraphs.sourceKind;
+          }
+        } else if (args.recordingEventLog) {
+          // generatePageGraph succeeded, so any Tier C event log is redundant.
+          await cleanupEventLogs(resolve(args.outputPath), logger);
         }
-      } else if (args.recordingEventLog) {
-        // generatePageGraph succeeded, so any Tier C event log is redundant.
-        await cleanupEventLogs(resolve(args.outputPath), logger);
+      } else {
+        logger.info("probe mode: no graph generated (stock browser, pass 2)");
       }
 
       // Record the completeness verdict where downstream tooling can check it,
@@ -677,11 +765,21 @@ export const doCrawl = async (
       const crawlStatus: CrawlStatus = {
         url: String(urlToCrawl),
         finishedAt: new Date().toISOString(),
-        graphStatus: graphWasComplete
-          ? "complete"
-          : graphmlPath !== null
-            ? "partial"
-            : "none",
+        // Stamp the consent configuration into every run, so a set of crawls
+        // taken under different consent states stays self-describing.
+        consentConfig: {
+          ...(args.extensionsPath !== undefined
+            ? { extensionsPath: args.extensionsPath }
+            : {}),
+          shields: args.withShieldsUp ? "up" : "down",
+        },
+        graphStatus: args.probe
+          ? "probe"
+          : graphWasComplete
+            ? "complete"
+            : graphmlPath !== null
+              ? "partial"
+              : "none",
         graphPath: graphmlPath,
         additionalGraphPaths: recoveredExtras,
         recoverySource,

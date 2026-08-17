@@ -42,6 +42,10 @@ interface CrawlArgs {
   bodyMax: number;
   bodiesBudgetMb: number;
   recordingEventLog: boolean;
+  // Pass-2 probe mode: a stock (non-PageGraph) browser, breakpoints only, no
+  // graphml. `probeTargets` is the target file produced from a pass-1 crawl.
+  probe: boolean;
+  probeTargets?: FilePath;
 }
 
 type ValidationResult = [boolean, CrawlArgs | ErrorMsg];

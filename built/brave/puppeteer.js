@@ -114,7 +114,13 @@ const makePuppeteerConf = async (args) => {
         "--window-size=1920,1080",
         "--user-data-dir=" + profilePath,
     ];
-    chromeArgs.push("--enable-features=PageGraph");
+    // Probe mode (pass 2) runs on a STOCK browser: it only needs the CDP
+    // debugger, and enabling PageGraph would impose the graph-recording cost and
+    // the renderer fragility (native-breakpoint SIGTRAP, recording-time crashes)
+    // that this pass exists to avoid.
+    if (!args.probe) {
+        chromeArgs.push("--enable-features=PageGraph");
+    }
     // Add --disable-setuid-sandbox if environment variable is set
     if (process.env.PAGEGRAPH_DISABLE_SETUID_SANDBOX === "true") {
         chromeArgs.push("--disable-setuid-sandbox");

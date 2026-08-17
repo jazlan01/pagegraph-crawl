@@ -478,7 +478,11 @@ export const writeHAR = async (
 };
 
 const createStacksPath = (args: CrawlArgs, url: URL): FilePath => {
-  const extension = args.compress ? ".stacks.json.gz" : ".stacks.json";
+  // Pass-2 probe captures are a different artefact from a pass-1 stack dump:
+  // no graph accompanies them and they carry the separate-page-load caveat.
+  // Name them apart so the two are never joined by mistake.
+  const base = args.probe ? ".probe.json" : ".stacks.json";
+  const extension = args.compress ? `${base}.gz` : base;
   const outputPath = join(createOutputPath(args, url) + extension);
   return outputPath;
 };
@@ -576,7 +580,9 @@ export interface CrawlStatus {
   // "complete": generatePageGraph succeeded and the stitched graph was
   //   written. "partial": generation failed but one or more graphs were
   //   recovered from renderer output. "none": nothing could be recovered.
-  graphStatus: "complete" | "partial" | "none";
+  // "probe" = pass 2 on a stock browser: no graph was requested, which is not
+  // the same as a graph having failed.
+  graphStatus: "complete" | "partial" | "none" | "probe";
   graphPath: string | null;
   // Any further recovered graphs beyond the primary (other frames/documents).
   additionalGraphPaths: string[];
@@ -586,6 +592,16 @@ export interface CrawlStatus {
   generateError?: string;
   // Set when CDP reported the target crashed during the crawl.
   targetCrashed?: string;
+  // The browser configuration that shapes what the page was willing to do.
+  // Recorded because a consent-state crawl is only interpretable if the run
+  // says which state it was in: the same site yields opposite cookie sets under
+  // accept-all and reject-all, and a directory of graphs with no record of the
+  // setting cannot be told apart afterwards.
+  consentConfig?: {
+    // Unpacked extension dir, if one was loaded (the consent automation).
+    extensionsPath?: string;
+    shields: "up" | "down";
+  };
 }
 
 // Deliberately never compressed: it is tiny, and it is the file a human or

@@ -1,4 +1,5 @@
 import { writeFileSync } from "node:fs";
+import { createHash } from "crypto";
 import { join } from "node:path";
 import { Protocol } from "devtools-protocol";
 import type { CDPSession } from "puppeteer-core";
@@ -82,7 +83,16 @@ const MAX_OBJ_PROPS = 50;
 // crawl. Object expansion stops once this is exhausted.
 const CAPTURE_NODE_BUDGET = 800;
 // "script" = module-top-level scope; huge and rarely the interesting state.
-const SKIP_SCOPE_TYPES = new Set(["global", "with", "module", "script"]);
+// `global` is skipped because it is the whole window object — thousands of
+// bindings, none of them the page's own work. `with` is skipped as unbounded.
+// `script` and `module` are NOT skipped: they hold the top-level bindings of the
+// script being paused in, which is precisely where an inline <script> keeps the
+// value it is about to write (a top-level `const` in a classic script is a
+// script-scope binding, not a local). Skipping them made every top-level inline
+// write capture an empty scope chain — the pause landed correctly and reported
+// nothing. Both are bounded by one script's own declarations, and the existing
+// node budget and value cap still apply.
+const SKIP_SCOPE_TYPES = new Set(["global", "with"]);
 
 // Cookie-write boundaries (always armed when --debug-stacks is set).
 const COOKIE_TARGETS: NativeTarget[] = [
@@ -109,6 +119,49 @@ interface OffsetBreakpoint {
   label: string;
   regex: RegExp;
   offset: number;
+  // SHA-256 the script had when pass 1 derived this offset, if known. An offset
+  // is only meaningful against the exact bytes it was computed from: if the
+  // bundle has rotated, the same offset points into unrelated code and would
+  // yield confident, wrong evidence. Set => verify before arming.
+  expectedSha256?: string;
+  // The SHA-256 of the script's pass-1 RESPONSE BODY, when that is all pass 1
+  // could supply. It is NOT enforced — a response body and the parsed source
+  // can legitimately differ — but it is reported next to the observed hash so
+  // the comparison can be made rather than assumed either way.
+  pass1ResponseSha256?: string;
+  // Inline-script disambiguator. Every inline script in a document shares the
+  // document's URL, so a URL+offset target is ambiguous by construction — and
+  // an offset valid for one inline script is often in range for another, where
+  // it lands in unrelated code. When set, the source immediately preceding the
+  // offset must end with this string, which identifies the intended script by
+  // its content instead of trusting position alone. Verified at arm time
+  // against the bytes the renderer parsed, so it needs nothing from pass 1.
+  requirePrecedingSource?: string;
+}
+
+// A target that was armed, and the bytes it was armed against. A target here
+// with no capture ran nothing; a target in no list never parsed at all.
+interface ArmedTarget {
+  spec: string;
+  label: string;
+  url: string;
+  line: number;
+  col: number;
+  observedSha256: string;
+  expectedSha256?: string;
+  pass1ResponseSha256?: string;
+  hashMatchesPass1Response?: boolean;
+}
+
+// A target that was deliberately NOT armed, recorded so the gap is visible in
+// the output rather than looking like a site that simply never hit the code.
+interface SkippedTarget {
+  skipped: string;
+  spec: string;
+  label: string;
+  url: string;
+  expectedSha256?: string;
+  actualSha256?: string;
 }
 
 // PageGraph records a flat character offset ("script position") into the
@@ -154,6 +207,16 @@ export class DebugStackTracker {
   #armedContexts = new Set<number>();
   #offsetBreakpoints: OffsetBreakpoint[] = [];
   #armedOffsetKeys = new Set<string>();
+  #skippedTargets: SkippedTarget[] = [];
+  #armedTargets: ArmedTarget[] = [];
+  #instrumentationPauseActive = false;
+  #inlineMisses: SkippedTarget[] = [];
+  // Where each script begins inside its document. Zero for an external file, but
+  // an inline <script> starts partway down the page and CDP addresses its
+  // breakpoints in DOCUMENT coordinates, while a PageGraph offset is relative to
+  // the script's OWN source. Without this the location is short by the script's
+  // start position and setBreakpoint answers "Could not resolve breakpoint".
+  #scriptStarts = new Map<string, { line: number; column: number }>();
   // URL regexes from every breakpoint spec, used to decide which loaded scripts
   // to dump (see saveScriptsDir); and the set of URLs already written.
   #breakpointUrlRegexes: RegExp[] = [];
@@ -183,9 +246,20 @@ export class DebugStackTracker {
       "Debugger.scriptParsed",
       (event: Protocol.Debugger.ScriptParsedEvent) => {
         this.#scriptUrls.set(event.scriptId, event.url);
+        this.#scriptStarts.set(event.scriptId, {
+          line: event.startLine,
+          column: event.startColumn,
+        });
         // Offset breakpoints can only be placed once we can read the source to
         // convert offset -> (line, column), which is when the script parses.
-        void this.#armOffsetsForScript(event);
+        // But scriptParsed does not hold execution, so when the instrumentation
+        // pause is available we arm from there instead: arming from both would
+        // let this racing path win, mark the target armed, and leave the pause
+        // handler with nothing to do — a breakpoint placed just after the code
+        // it was meant to catch.
+        if (!this.#instrumentationPauseActive) {
+          void this.#armOffsetsForScript(event);
+        }
         // Dump the loaded source of breakpoint-targeted scripts so coordinates
         // can be verified against the exact bytes the renderer ran.
         void this.#maybeSaveScript(event);
@@ -214,7 +288,34 @@ export class DebugStackTracker {
       await this.#registerSpec(spec);
     }
 
-    if (!this.#opts.native && this.#opts.breakpoints.length === 0) {
+    // Offset targets are placed from inside the beforeScriptExecution pause,
+    // so the breakpoint must exist before navigation. Only armed when there is
+    // something to place: it pauses on every script, which is wasted work
+    // otherwise.
+    if (this.#offsetBreakpoints.length > 0) {
+      try {
+        await client.send("Debugger.setInstrumentationBreakpoint", {
+          instrumentation: "beforeScriptExecution",
+        });
+        this.#instrumentationPauseActive = true;
+        this.#log(
+          "enable",
+          "armed beforeScriptExecution instrumentation pause",
+        );
+      } catch (err) {
+        this.#log(
+          "enable",
+          `could not set the beforeScriptExecution pause (${String(err)}); ` +
+            "offset targets may miss code that runs at load",
+        );
+      }
+    }
+
+    if (
+      !this.#opts.native &&
+      this.#opts.breakpoints.length === 0 &&
+      this.#offsetBreakpoints.length === 0
+    ) {
       this.#log(
         "enable",
         "no targets armed: pass --debug-breakpoint '<urlRegex>#<offset>' " +
@@ -226,6 +327,96 @@ export class DebugStackTracker {
 
   getRecords(): StackRecord[] {
     return this.#records;
+  }
+
+  // Targets deliberately left unarmed (script rotated since pass 1). Reported
+  // alongside the captures so a missing value reads as "not attempted, and
+  // here is why" rather than "the site never ran that code".
+  getSkippedTargets(): SkippedTarget[] {
+    return this.#skippedTargets;
+  }
+
+  // Every target that was armed, with the hash of the bytes it was armed
+  // against. A target present here with no capture ran nothing; a target in
+  // neither list never parsed at all. The three lists together mean an absent
+  // value always has a stated reason.
+  getArmedTargets(): ArmedTarget[] {
+    return this.#armedTargets;
+  }
+
+  // Targets whose script never parsed at all, so nothing was even attempted.
+  // The commonest cause is a content blocker in the pass-2 browser: it blocks
+  // exactly the tracker scripts a probe exists to pause in, and the run then
+  // looks like a site that quietly stopped setting the cookie. Naming it here
+  // is the difference between a stated gap and a wrong conclusion.
+  getUnarmedTargets(): SkippedTarget[] {
+    const seen = new Set([
+      ...this.#armedTargets.map((a) => a.spec),
+      ...this.#skippedTargets.map((s) => s.spec),
+    ]);
+    // An inline target that matched no script at all: report the near-misses,
+    // which say what was actually at that offset, rather than a bare "never
+    // parsed" that would point at the wrong cause entirely.
+    const unmatchedInline = this.#inlineMisses.filter(
+      (m) => !this.#armedTargets.some((a) => a.spec === m.spec),
+    );
+    return this.#offsetBreakpoints
+      .filter((ob) => !seen.has(ob.spec))
+      .filter((ob) => !unmatchedInline.some((m) => m.spec === ob.spec))
+      .map((ob) => ({
+        skipped:
+          "script never parsed — no script matching this URL pattern loaded. " +
+          "If the pass-2 browser blocks trackers (Brave with shields on, an " +
+          "extension, a filtering DNS), it blocked the target itself; verify " +
+          "the request was answered before reading anything into the absence.",
+        spec: ob.spec,
+        label: ob.label,
+        url: "",
+      }))
+      .concat(unmatchedInline);
+  }
+
+  /**
+   * Register probe targets derived from a pass-1 crawl. Unlike a bare
+   * `--debug-breakpoint` spec these carry the SHA-256 the script had when the
+   * offset was computed, which is what makes the offset trustworthy: it is
+   * verified against the bytes the renderer parses before the breakpoint is
+   * armed. Must be called before page.goto, like registerSpec.
+   */
+  registerTargets(
+    targets: {
+      urlRegex: string;
+      offset: number;
+      expectedSha256?: string;
+      pass1ResponseSha256?: string;
+      requirePrecedingSource?: string;
+      label?: string;
+    }[],
+  ): void {
+    for (const tgt of targets) {
+      try {
+        const regex = new RegExp(tgt.urlRegex);
+        this.#breakpointUrlRegexes.push(regex);
+        this.#offsetBreakpoints.push({
+          spec: `${tgt.urlRegex}#${String(tgt.offset)}`,
+          label: tgt.label ?? `probe:${tgt.urlRegex}#${String(tgt.offset)}`,
+          regex,
+          offset: tgt.offset,
+          expectedSha256: tgt.expectedSha256,
+          pass1ResponseSha256: tgt.pass1ResponseSha256,
+          requirePrecedingSource: tgt.requirePrecedingSource,
+        });
+      } catch (err) {
+        this.#log(
+          "registerTargets",
+          `bad target ${tgt.urlRegex}: ${String(err)}`,
+        );
+      }
+    }
+    this.#log(
+      "registerTargets",
+      `registered ${String(targets.length)} probe target(s)`,
+    );
   }
 
   // Stop debugging: deactivate breakpoints, resume any active pause, and detach
@@ -392,14 +583,87 @@ export class DebugStackTracker {
         const src = (await client.send("Debugger.getScriptSource", {
           scriptId: event.scriptId,
         })) as Protocol.Debugger.GetScriptSourceResponse;
-        const { lineNumber, columnNumber } = offsetToLineCol(
-          src.scriptSource,
-          ob.offset,
-        );
+        // Script-identity guard. Without PageGraph there is no `response hash`
+        // to lean on, so the probe hashes the bytes the renderer actually
+        // parsed and compares them to what pass 1 saw. A mismatch is recorded
+        // and the target left unarmed: a stated gap is worth more than a
+        // capture from the wrong code.
+        const actual = createHash("sha256")
+          .update(src.scriptSource)
+          .digest("hex");
+        if (ob.expectedSha256 !== undefined) {
+          if (actual !== ob.expectedSha256) {
+            this.#skippedTargets.push({
+              skipped: "script changed since pass 1 — offset not armed",
+              spec: ob.spec,
+              label: ob.label,
+              url: event.url,
+              expectedSha256: ob.expectedSha256,
+              actualSha256: actual,
+            });
+            this.#log(
+              "armOffsetsForScript",
+              `SKIPPED ${ob.spec}: ${event.url} hash ${actual.slice(0, 12)} != ` +
+                `pass-1 ${ob.expectedSha256.slice(0, 12)}`,
+            );
+            continue;
+          }
+        }
+        if (ob.requirePrecedingSource !== undefined) {
+          const preceding = src.scriptSource.slice(0, ob.offset).trimEnd();
+          if (!preceding.endsWith(ob.requirePrecedingSource)) {
+            // Not an error: on a document with several inline scripts this
+            // fires for each one that is not the target, which is the point.
+            // Only recorded if NO script ends up matching (see below).
+            this.#inlineMisses.push({
+              skipped:
+                `inline script did not match the target's context (expected ` +
+                `the source before offset ${String(ob.offset)} to end with ` +
+                `"${ob.requirePrecedingSource}", found "${preceding.slice(-40)}")`,
+              spec: ob.spec,
+              label: ob.label,
+              url: event.url,
+            });
+            this.#armedOffsetKeys.delete(key);
+            continue;
+          }
+        }
+        const inSource = offsetToLineCol(src.scriptSource, ob.offset);
+        // Translate source coordinates into the document coordinates CDP wants.
+        // The column shifts only on the script's first line, where the source
+        // and the document share a line.
+        const start = this.#scriptStarts.get(event.scriptId) ?? {
+          line: 0,
+          column: 0,
+        };
+        const lineNumber = start.line + inSource.lineNumber;
+        const columnNumber =
+          inSource.lineNumber === 0
+            ? start.column + inSource.columnNumber
+            : inSource.columnNumber;
         const bp = (await client.send("Debugger.setBreakpoint", {
           location: { scriptId: event.scriptId, lineNumber, columnNumber },
         })) as Protocol.Debugger.SetBreakpointResponse;
         this.#breakpointLabels.set(bp.breakpointId, ob.label);
+        // Record what was armed and against which bytes. The hash is emitted
+        // even when it was not enforced, so a target whose pass-1 hash came
+        // from a non-authoritative source (a response body rather than the
+        // parsed source) can still be reconciled after the fact instead of
+        // being either trusted blindly or skipped needlessly.
+        this.#armedTargets.push({
+          spec: ob.spec,
+          label: ob.label,
+          url: event.url,
+          line: lineNumber,
+          col: columnNumber,
+          observedSha256: actual,
+          expectedSha256: ob.expectedSha256,
+          pass1ResponseSha256: ob.pass1ResponseSha256,
+          hashMatchesPass1Response:
+            ob.pass1ResponseSha256 === undefined
+              ? undefined
+              : ob.pass1ResponseSha256 === actual,
+        });
         this.#log(
           "armOffsetsForScript",
           `armed ${ob.spec} at ${event.url} ${String(lineNumber)}:${String(columnNumber)} ` +
@@ -452,6 +716,24 @@ export class DebugStackTracker {
       return;
     }
     try {
+      // An instrumentation pause is not a capture: it is the renderer holding
+      // still, just before a script runs, so the offset breakpoints for that
+      // script can be placed. Without it there is a race — Debugger.scriptParsed
+      // fires but does not block, so a script that writes its cookie at load
+      // finishes before the async setBreakpoint round-trip lands, and the probe
+      // reports a clean run with no captures. Arm here, then resume.
+      if (event.reason === "instrumentation") {
+        const scriptId = (event.data as { scriptId?: string } | undefined)
+          ?.scriptId;
+        if (scriptId !== undefined) {
+          const url = this.#scriptUrls.get(scriptId) ?? "";
+          await this.#armOffsetsForScript({
+            scriptId,
+            url,
+          } as Protocol.Debugger.ScriptParsedEvent);
+        }
+        return;
+      }
       // Once at the cap, deactivate ALL breakpoints so we stop pausing — a hot
       // offset would otherwise pause+resume thousands of times and stall the
       // crawl. We still resume this pause below.

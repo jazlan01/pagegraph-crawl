@@ -165,6 +165,30 @@ parser.add_argument("--debug-breakpoint", {
   default: [],
   metavar: "SPEC",
 });
+parser.add_argument("--probe", {
+  help:
+    "Pass-2 probe mode: pause at known script sites to capture the values a " +
+    "page holds before it transforms them, using targets derived from an " +
+    "earlier PageGraph crawl. Runs on a STOCK Brave/Chromium — PageGraph is " +
+    "not enabled and no .graphml is produced, so the renderer-crash and " +
+    "native-breakpoint hazards of a PageGraph build do not apply. Implies " +
+    "--debug-stacks; pair with '--shields down'. Requires --probe-targets or " +
+    "--debug-breakpoint.",
+  action: "store_true",
+  dest: "probe",
+  default: false,
+});
+parser.add_argument("--probe-targets", {
+  help:
+    "With --probe, a JSON file of breakpoint targets produced by " +
+    "analysis/plan-probe-targets.mjs. Each target carries the script URL " +
+    "pattern, the offset, and the SHA-256 the script had during pass 1; a " +
+    "target whose script has since changed is skipped and recorded rather " +
+    "than armed against the wrong code.",
+  dest: "probe_targets",
+  default: null,
+  metavar: "FILE",
+});
 parser.add_argument("--debug-max-captures", {
   help:
     "With --debug-stacks, cap the total number of paused-stack captures so " +

@@ -101,6 +101,40 @@ export const validate = (rawArgs) => {
     const bodyMax = rawArgs.body_max;
     const bodiesBudgetMb = rawArgs.bodies_budget_mb;
     const recordingEventLog = rawArgs.recording_event_log;
+    const probe = rawArgs.probe;
+    const probeTargets = rawArgs.probe_targets ?? null;
+    // Probe mode is pass 2: a stock browser pausing at sites a pass-1 crawl
+    // already located. It records no graph, so options that only mean something
+    // for graph capture are rejected rather than silently ignored.
+    if (probe) {
+        if (probeTargets === null && debugBreakpoints.length === 0) {
+            return [
+                false,
+                "--probe needs targets: pass --probe-targets <file> (from " +
+                    "analysis/plan-probe-targets.mjs) or one or more --debug-breakpoint specs",
+            ];
+        }
+        if (probeTargets !== null && !fsLib.existsSync(probeTargets)) {
+            return [false, `--probe-targets file does not exist: ${probeTargets}`];
+        }
+        if (recordingEventLog) {
+            return [
+                false,
+                "--recording-event-log records the PageGraph build's graph items and " +
+                    "does nothing in --probe mode (no graph is generated)",
+            ];
+        }
+        if (recursiveDepth > 1) {
+            return [
+                false,
+                "--recursive-depth is a pass-1 crawl behaviour; --probe visits the " +
+                    "single URL its targets were derived from",
+            ];
+        }
+    }
+    else if (probeTargets !== null) {
+        return [false, "--probe-targets requires --probe"];
+    }
     if (bodyMax < 0) {
         return [false, `--body-max must not be negative: ${String(bodyMax)}`];
     }
@@ -130,7 +164,9 @@ export const validate = (rawArgs) => {
         storeHar,
         storeHarBody,
         compress,
-        debugStacks,
+        // probe mode always needs the debugger attached; asking for one without
+        // the other is a mistake rather than a configuration.
+        debugStacks: debugStacks || probe,
         debugNative,
         debugEncoding,
         debugBreakpoints,
@@ -142,6 +178,8 @@ export const validate = (rawArgs) => {
         bodyMax,
         bodiesBudgetMb,
         recordingEventLog,
+        probe,
+        probeTargets: probeTargets ?? undefined,
     };
     if (rawArgs.proxy_server !== undefined) {
         try {

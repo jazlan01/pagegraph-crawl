@@ -343,7 +343,11 @@ export const writeHAR = async (args, url, har, logger) => {
     }
 };
 const createStacksPath = (args, url) => {
-    const extension = args.compress ? ".stacks.json.gz" : ".stacks.json";
+    // Pass-2 probe captures are a different artefact from a pass-1 stack dump:
+    // no graph accompanies them and they carry the separate-page-load caveat.
+    // Name them apart so the two are never joined by mistake.
+    const base = args.probe ? ".probe.json" : ".stacks.json";
+    const extension = args.compress ? `${base}.gz` : base;
     const outputPath = join(createOutputPath(args, url) + extension);
     return outputPath;
 };
