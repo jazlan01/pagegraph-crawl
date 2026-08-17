@@ -1,0 +1,56 @@
+{
+  "_comment": "Consent basis per cookie-purpose category, and the contradiction sets derived from it. The report uses this to flag (a) declarations that are internally contradictory and (b) declarations refuted by observed behaviour. The RULE is simple and derived, not a magic constant: a cookie cannot simultaneously be consent-EXEMPT and consent-REQUIRED, so any item asserting one category from each bucket is self-contradictory. Bases are recorded so the sets can be re-derived if the taxonomy changes.",
+  "sources": {
+    "PECR_reg_6": "Privacy and Electronic Communications Regulations 2003, reg 6(4): consent is not required for storage/access that is (a) for the sole purpose of carrying out a transmission, or (b) strictly necessary to provide a service the user requested. Everything else requires consent.",
+    "ICC_UK_Cookie_Guide": "ICC UK Cookie Guide category scheme: Strictly Necessary (exempt) / Functionality / Performance (analytics) / Targeting-Advertising. Only Strictly Necessary is consent-exempt.",
+    "IAB_TCF_v2_2": "IAB Europe TCF v2.2: Purposes 1-11 are processed on a consent (or, where permitted, legitimate-interest) basis and are user-rejectable; Special Purposes (SP1 security/fraud, SP2 technical ad/content delivery) run ONLY on legitimate interest and are not consentable — the framework's analogue of 'essential'.",
+    "note": "Consent bases here are the settled regulatory position, cited to the instruments. The ICO treats analytics as requiring consent (not strictly necessary); some 'functional'/preference cookies are borderline in practice. Where a category's treatment is contested it is marked `contested: true` and the report states it as such rather than asserting a hard contradiction."
+  },
+
+  "icc": {
+    "Necessary":   { "consentBasis": "exempt",           "source": "PECR_reg_6(4)(b); ICC 'Strictly Necessary'" },
+    "Functional":  { "consentBasis": "consent-required", "contested": true, "source": "ICC 'Functionality' — preference cookies enhance but are not strictly necessary; consent treatment is applied leniently in practice" },
+    "Analytics":   { "consentBasis": "consent-required", "source": "ICC 'Performance'; ICO guidance — analytics is not strictly necessary" },
+    "Advertising": { "consentBasis": "consent-required", "source": "ICC 'Targeting'" }
+  },
+
+  "tcf": {
+    "P1":  { "consentBasis": "consent-required", "gateway": true,  "family": "essential",   "note": "Store/access is the storage act itself and co-occurs with almost every purpose; near-universal, so its presence alongside others is normal, not a contradiction." },
+    "P2":  { "consentBasis": "consent-required", "family": "advertising" },
+    "P3":  { "consentBasis": "consent-required", "family": "advertising" },
+    "P4":  { "consentBasis": "consent-required", "family": "advertising" },
+    "P5":  { "consentBasis": "consent-required", "family": "content" },
+    "P6":  { "consentBasis": "consent-required", "family": "content" },
+    "P7":  { "consentBasis": "consent-required", "family": "advertising" },
+    "P8":  { "consentBasis": "consent-required", "family": "analytics" },
+    "P9":  { "consentBasis": "consent-required", "family": "analytics" },
+    "P10": { "consentBasis": "consent-required", "family": "functional" },
+    "P11": { "consentBasis": "consent-required", "family": "content" },
+    "SP1": { "consentBasis": "legitimate-interest", "family": "essential", "note": "Security/fraud — not consentable under TCF; the framework's 'essential'. Treated as exempt for contradiction purposes." }
+  },
+
+  "us_state": {
+    "Strictly Necessary / Exempt":                        { "consentBasis": "exempt" },
+    "Analytics / Performance":                            { "consentBasis": "consent-required" },
+    "Targeted Advertising":                               { "consentBasis": "consent-required" },
+    "Sharing for Cross-Context Behavioral Advertising":   { "consentBasis": "consent-required" },
+    "Sale of Personal Information":                       { "consentBasis": "consent-required" }
+  },
+
+  "contradictionRule": "A category with consentBasis 'exempt' or 'legitimate-interest' cannot co-hold with a category whose consentBasis is 'consent-required'. Asserting both means the cookie is claimed as consent-free AND consent-requiring at once, which is impossible. The gateway purpose P1 is excluded from the consent-required side of this test because it accompanies essentially every purpose.",
+
+  "exemptCategories": {
+    "icc": ["Necessary"],
+    "tcf": ["SP1"],
+    "us_state": ["Strictly Necessary / Exempt"]
+  },
+
+  "derivedContradictions": {
+    "_comment": "Precomputed for inspection; the report re-derives the same pairs from `icc`/`tcf` bases so this stays in sync. Each pair is (exempt-category, consent-required-category) that cannot co-hold. Severity reflects how far apart the claim is: exempt-vs-advertising is the egregious case, exempt-vs-functional the softest (and contested).",
+    "icc": [
+      { "a": "Necessary", "b": "Advertising", "severity": "high" },
+      { "a": "Necessary", "b": "Analytics",   "severity": "high" },
+      { "a": "Necessary", "b": "Functional",  "severity": "low", "contested": true }
+    ]
+  }
+}
