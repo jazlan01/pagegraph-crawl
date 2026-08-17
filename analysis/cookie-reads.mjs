@@ -254,8 +254,13 @@ for await (const el of streamElements(graphmlPath)) {
     }
   } else if (et === "storage set" && t === cookieJarId) {
     const key = eAttr(el.body, "key");
-    const value = unwrap(eAttr(el.body, "value"));
-    if (key && value != null) cookieOf(key).values.add(value);
+    // A `storage set` records the whole `document.cookie` assignment, ATTRIBUTES
+    // INCLUDED (`v; path=/; domain=.x.com`). Seeding the taint set with that string
+    // makes unrelated cookies share the `; path=/; domain=…` boilerplate and match
+    // it everywhere, fabricating consumers. A cookie value cannot contain an
+    // unencoded ";", so truncating at the first one is always correct.
+    const value = unwrap(eAttr(el.body, "value"))?.split(";")[0].trim();
+    if (key && value) cookieOf(key).values.add(value);
   }
 }
 // resolve a script node -> source URL (external script's src, else page url)

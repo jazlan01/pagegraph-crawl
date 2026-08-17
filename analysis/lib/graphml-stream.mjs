@@ -36,9 +36,25 @@ export const readPageUrl = (path) => {
 // Yields every <node>, <edge> and <key> element as {tag, head, body}, holding
 // only a partial element in memory at a time.
 export async function* streamElements(path) {
+  yield* streamElementsFiltered(path, ["node", "edge", "key"]);
+}
+
+/**
+ * The same scanner, restricted to the tags you actually want.
+ *
+ * Filtering is the whole point on a multi-GB graph — `create node` alone is the highest-volume
+ * edge type — but it introduces a failure the unfiltered version cannot have. When nothing in a
+ * chunk matches, `consumedTo` stays 0, so the carry buffer keeps every byte that streamed past.
+ * On a graph where the interesting elements are sparse that grows until it exceeds V8's maximum
+ * string length and the process dies with an unhelpful error. Hence the bound below.
+ *
+ * ALWAYS include "key" in `tags`: attribute ids (dNN) are only resolvable from the <key> block,
+ * and it appears once at the head of the file.
+ */
+export async function* streamElementsFiltered(path, tags) {
   const stream = createReadStream(path, { encoding: "utf8" });
   let buf = "";
-  const openRe = /<(node|edge|key)\b/g;
+  const openRe = new RegExp(`<(${tags.join("|")})\\b`, "g");
   for await (const chunk of stream) {
     buf += chunk;
     let consumedTo = 0;
@@ -71,6 +87,14 @@ export async function* streamElements(path) {
       openRe.lastIndex = after;
     }
     buf = buf.slice(consumedTo);
+    // Keep only from the earliest unconsumed opening tag — an element may legitimately span
+    // chunks and be large (a stack trace runs to tens of KB). With no opening tag at all, keep
+    // just enough to catch a tag split across the chunk boundary.
+    if (buf.length > 1 << 20) {
+      openRe.lastIndex = 0;
+      const next = openRe.exec(buf);
+      buf = next ? buf.slice(next.index) : buf.slice(-64);
+    }
   }
 }
 

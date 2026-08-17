@@ -175,8 +175,13 @@ for await (const el of streamElements(graphmlPath)) {
       const c = cookieOf(name); if (val) c.values.add(val); if (t) c.readers.add(t);
     }
   } else if (et === "storage set" && t === cookieJarId) {
-    const key = eAttr(el.body, "key"); const value = unwrap(eAttr(el.body, "value"));
-    if (key && value != null) cookieOf(key).values.add(value);
+    const key = eAttr(el.body, "key");
+    // Strip cookie ATTRIBUTES: a `storage set` records the whole `document.cookie`
+    // assignment (`v; path=/; domain=.x.com`). Tainting with that boilerplate makes
+    // unrelated cookies match it everywhere and invents network hits. A value cannot
+    // contain an unencoded ";", so truncating at the first one is always correct.
+    const value = unwrap(eAttr(el.body, "value"))?.split(";")[0].trim();
+    if (key && value) cookieOf(key).values.add(value);
   }
 }
 const scriptUrlCache = new Map();

@@ -290,8 +290,12 @@ if (asJson) {
       2,
     ),
   );
-  process.exit(0);
+  // NO process.exit() here. stdout to a pipe is asynchronous: exiting immediately after a large
+  // write truncates it at the 64 KB pipe buffer, and the consumer sees "Unterminated string in
+  // JSON". That is exactly how this tool's output reached cookie-evidence.mjs as a parse error
+  // rather than as data. Falling off the end lets Node flush before the process ends.
 }
+if (!asJson) {
 
 console.log(`page: ${readPageUrl(graphmlPath) ?? "(unknown)"}`);
 console.log(
@@ -332,4 +336,5 @@ for (const [name, hits] of findings) {
     }
   }
   console.log("");
+}
 }
