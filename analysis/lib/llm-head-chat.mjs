@@ -138,8 +138,10 @@ export const runHead = async (system, user, opts = {}) => {
       { role: "system", content: system },
       { role: "user", content: typeof user === "string" ? user : JSON.stringify(user) },
     ],
-    max_completion_tokens: 4000,
-    response_format: RESPONSE_FORMAT,
+    max_completion_tokens: opts.maxTokens || 4000,
+    // Default to the cookie-classification schema; callers with a different output shape (e.g. the
+    // read-resolver) pass their own strict json_schema.
+    response_format: opts.responseFormat || RESPONSE_FORMAT,
     ...cfg.extra(),
   };
   return postAndParse(cfg, apiKey, body, provider);
