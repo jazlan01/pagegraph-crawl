@@ -1,0 +1,1367 @@
+{
+ "source": "VaultJS Internal MCP · cookie_classification.classify_cookies",
+ "caveat": "Name-based, not observed. The MCP's own wording: a name-only match is 'not domain-confirmed; may collide with an unrelated same-name cookie'. The corpus is third-party CMP self-declaration aggregated across sites, not ground truth, and the description itself is model-written. Treated as CONTEXT for a reader; never used to derive a label, and dropped whenever it contradicts what this crawl recorded.",
+ "customerId": "0 (no customer scope — behavioural warehouse evidence deliberately not used; only the name/CMP layer contributes to these descriptions)",
+ "records": {
+  "demdex": {
+   "knownAs": "This cookie identifies a unique visitor across different websites to enable audience segmentation and cross-site tracking.",
+   "domain": ".demdex.net",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "ad-id": {
+   "knownAs": "A unique identifier used by Amazon Advertising to track users across different websites for targeted advertising and measurement.",
+   "domain": ".amazon-adsystem.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "barometric[cuid]": {
+   "knownAs": "Tracks ad conversions and measures performance for Barometric podcast advertising campaigns.",
+   "domain": ".trkn.us",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "_pinterest_ct_ua": {
+   "knownAs": "A third-party cookie from Pinterest used to track interactions across sites for personalized advertising and conversion measurement.",
+   "domain": ".ct.pinterest.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "ad-privacy": {
+   "knownAs": "Stores user privacy preferences and opt-out choices for Amazon Advertising services.",
+   "domain": ".amazon-adsystem.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "MR": {
+   "knownAs": "This cookie is used by Microsoft Bing to synchronize or refresh advertising identifiers and measure advertisement performance.",
+   "domain": ".bat.bing.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "MUID": {
+   "knownAs": "This cookie is a unique identifier used by Microsoft to track users across its domains and for advertising purposes.",
+   "domain": ".bing.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "_cc_id": {
+   "knownAs": "A unique identifier used by Lotame to build a profile of your interests for targeted advertising across different websites.",
+   "domain": ".crwdcntrl.net",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "dpm": {
+   "knownAs": "Synchronizes unique identifiers across different websites to enable targeted advertising and audience profiling through Adobe Audience Manager.",
+   "domain": ".dpm.demdex.net",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "pi": {
+   "knownAs": "Registers a unique ID used for audience targeting and advertising pixel synchronization.",
+   "domain": ".ml314.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "uuid2": {
+   "knownAs": "A unique identifier used by AppNexus/Xandr to recognize devices and deliver targeted advertisements across various websites.",
+   "domain": ".adnxs.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "cg_uuid": {
+   "knownAs": "Used to identify and prevent fraudulent activity and automated bot traffic on the website.",
+   "domain": "obseu.aseasky.link",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "dextp": {
+   "knownAs": "Records the last time Adobe Audience Manager synchronized user data with other platforms.",
+   "domain": ".demdex.net",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "everest_g_v2": {
+   "knownAs": "Maps advertisement clicks to website events to measure and optimize advertising campaign performance.",
+   "domain": ".everesttech.net",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "test_cookie": {
+   "knownAs": "Used to check if the user's browser supports cookies.",
+   "domain": ".doubleclick.net",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "XANDR_PANID": {
+   "knownAs": "Registers a unique ID to identify a user's device for targeted advertising and performance measurement across different websites.",
+   "domain": ".adnxs.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "_cc_dc": {
+   "knownAs": "Stores an indicator of the data center where a user's tracking profile originated to support Lotame's targeted advertising services.",
+   "domain": ".crwdcntrl.net",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "33x_ps": {
+   "knownAs": "This cookie is used by 33Across to identify visitors across different websites to deliver personalized advertisements.",
+   "domain": ".33across.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "anj": {
+   "knownAs": "Denotes whether a user's unique identifier is synchronized with Xandr's advertising partners.",
+   "domain": ".adnxs.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "personalization_id": {
+   "knownAs": "Used by Twitter to track user behavior across websites to personalize advertisements and content.",
+   "domain": ".twitter.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "UID": {
+   "knownAs": "A unique identifier used by ScorecardResearch for cross-site audience measurement and market research.",
+   "domain": ".scorecardresearch.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "XID": {
+   "knownAs": "Used by ScorecardResearch for market research and measuring audience behavior across websites.",
+   "domain": ".scorecardresearch.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "_ga": {
+   "knownAs": "Registers a unique ID used to generate statistical data on how the visitor uses the website.",
+   "domain": ".brown-forman.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "OptanonConsent": {
+   "knownAs": "Stores your cookie consent preferences so the site can respect your privacy choices on future visits.",
+   "domain": "www.brown-forman.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "OptanonAlertBoxClosed": {
+   "knownAs": "Records that the cookie consent banner has been closed to prevent it from reappearing on future visits.",
+   "domain": "www.brown-forman.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "_ga_006T86XBJP": {
+   "knownAs": "Used by Google Analytics to persist session state and track site usage.",
+   "domain": ".brown-forman.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "_pxvid": {
+   "knownAs": "Used by PerimeterX security services to distinguish between human users and automated bots to prevent malicious activity.",
+   "domain": "www.chegg.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "_sdsat_authState": {
+   "knownAs": "Maintains the user's authentication state to ensure website features and tags function correctly.",
+   "domain": ".chegg.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "aws-waf-token": {
+   "knownAs": "Used by Amazon Web Services to protect the website against automated attacks and verify human users.",
+   "domain": ".www.chegg.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "CSID": {
+   "knownAs": "A session and identity identifier used to verify user authenticity and prevent fraud.",
+   "domain": ".chegg.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "CVID": {
+   "knownAs": "A unique visitor identifier used for site performance measurement and session management.",
+   "domain": ".chegg.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "pxcts": {
+   "knownAs": "This cookie is used to distinguish between human users and automated bots to prevent fraud.",
+   "domain": "www.chegg.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "_px3": {
+   "knownAs": "Helps protect the website against bot attacks and unauthorized access by distinguishing humans from automated scripts.",
+   "domain": "www.chegg.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "_pxttld": {
+   "knownAs": "Used by PerimeterX (HUMAN Security) to manage bot detection and ensure site security.",
+   "domain": "www.chegg.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "AMP_b187e8b991": {
+   "knownAs": "Used by the Amplitude analytics platform to track user interaction and product performance.",
+   "domain": ".chegg.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "OTGPPConsent": {
+   "knownAs": "Stores your privacy and consent preferences according to the Global Privacy Platform (GPP) framework.",
+   "domain": ".chegg.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "_pxde": {
+   "knownAs": "Helps prevent malicious bot activity and ensures the security of the website.",
+   "domain": "www.chegg.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "AMP_MKTG_b187e8b991": {
+   "knownAs": "This cookie is used by Amplitude to track marketing campaign attribution and site performance.",
+   "domain": ".chegg.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "AMP_TEST": {
+   "knownAs": "Verifies if the browser allows cookies to support the Amplitude analytics service.",
+   "domain": "www.chegg.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview",
+   "groupedBy": "pattern_family"
+  },
+  "AMP_TLDTEST": {
+   "knownAs": "Verifies if the browser allows cookies to support the Amplitude analytics service.",
+   "domain": "www.chegg.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview",
+   "groupedBy": "pattern_family",
+   "classifiedAs": "AMP_TEST"
+  },
+  "userData": {
+   "knownAs": "Stores user-specific session data, including purchase history and last viewed products, to maintain site functionality.",
+   "domain": "www.chegg.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "_abck": {
+   "knownAs": "Used by Akamai Bot Manager to detect and prevent malicious bot activity and ensure website security.",
+   "domain": ".costco.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "ak_bmsc": {
+   "knownAs": "Used by Akamai Bot Manager to distinguish between human and automated traffic for security purposes.",
+   "domain": ".costco.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "akaas_AS01": {
+   "knownAs": "Used by Akamai Adaptive Acceleration to optimize website performance and page load speeds.",
+   "domain": "www.costco.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "akavpau_zezxapz5yf": {
+   "knownAs": "This cookie is set by Akamai to manage web traffic and ensure site performance during high-volume periods.",
+   "domain": ".www.costco.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "bm_lso": {
+   "knownAs": "Used by Akamai Bot Manager to distinguish between humans and automated bots to prevent fraud.",
+   "domain": ".www.costco.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "bm_s": {
+   "knownAs": "This Akamai Bot Manager cookie is used to detect and prevent automated bot traffic to protect the site.",
+   "domain": ".costco.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "bm_so": {
+   "knownAs": "A security cookie used by Akamai Bot Manager to identify and prevent automated or malicious traffic.",
+   "domain": ".costco.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "bm_sv": {
+   "knownAs": "Used by Akamai Bot Manager to distinguish between human users and automated bots to protect the site from abuse.",
+   "domain": ".costco.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "bm_sz": {
+   "knownAs": "This cookie is used by Akamai's Bot Manager to detect and prevent automated bot traffic.",
+   "domain": ".costco.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "invCheckCity": {
+   "knownAs": "Stores the user's selected city to provide accurate local product availability and inventory information.",
+   "domain": "www.costco.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "JSESSIONID": {
+   "knownAs": "General purpose platform session cookie used to maintain user state across page requests.",
+   "domain": "www.costco.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "STORELOCATION": {
+   "knownAs": "Remembers your selected warehouse location to show local product availability and pricing.",
+   "domain": "www.costco.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "WAREHOUSEDELIVERY_WHS": {
+   "knownAs": "Stores information about the user's assigned warehouse to provide accurate local inventory and delivery options.",
+   "domain": "www.costco.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "WC_AUTHENTICATION_-1002": {
+   "knownAs": "This cookie is used to maintain a secure user session and authentication status during your visit.",
+   "domain": "www.costco.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "WC_GENERIC_ACTIVITYDATA": {
+   "knownAs": "Maintains session information such as language preferences and store identification for the IBM WebSphere Commerce platform.",
+   "domain": "www.costco.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "WC_PERSISTENT": {
+   "knownAs": "Stores user identity and session identifiers to maintain shopping cart items across visits.",
+   "domain": "www.costco.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "WC_USERACTIVITY_-1002": {
+   "knownAs": "Maintains the user's session state and security during their visit to the store.",
+   "domain": "www.costco.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "BCO": {
+   "knownAs": "Maintains the user's session state and site context during browsing.",
+   "domain": ".costco.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "C_LOC": {
+   "knownAs": "Stores geographic or store-location information to provide local warehouse details, inventory, and pricing.",
+   "domain": "www.costco.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "C_WHLOC": {
+   "knownAs": "Stores the user's selected warehouse location to ensure accurate local inventory and pricing.",
+   "domain": "www.costco.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "client-zip-short": {
+   "knownAs": "Stores a shortened version of the user's zip code to display local warehouse availability and pricing.",
+   "domain": "www.costco.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "invCheckPostalCode": {
+   "knownAs": "Stores the user's postal code to display local product availability and warehouse pricing.",
+   "domain": "www.costco.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "invCheckStateCode": {
+   "knownAs": "Stores the user's state code to ensure local inventory and pricing information is accurate.",
+   "domain": "www.costco.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "RT": {
+   "knownAs": "Measures page load times and site performance for optimization.",
+   "domain": ".www.costco.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "tcm": {
+   "knownAs": "Stores your cookie consent preferences to ensure the website complies with privacy laws.",
+   "domain": ".costco.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "WC_ACTIVEPOINTER": {
+   "knownAs": "Manages the active store identifier to ensure the correct storefront and catalog are displayed.",
+   "domain": "www.costco.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "WC_SESSION_ESTABLISHED": {
+   "knownAs": "Technical flag used by the IBM WebSphere Commerce platform to confirm a valid communication session has been established.",
+   "domain": "www.costco.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "dtCookie": {
+   "knownAs": "Tracks website performance and user experience metrics to ensure site stability and responsiveness.",
+   "domain": ".delta.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "location": {
+   "knownAs": "Stores the user's geographic location or airport preference to localize site content and pre-fill search forms.",
+   "domain": "www.delta.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "prefUI": {
+   "knownAs": "Remembers user interface preferences and localization settings for a consistent experience.",
+   "domain": ".delta.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "dtPC": {
+   "knownAs": "Used by Dynatrace to monitor website performance and correlate user sessions for technical troubleshooting.",
+   "domain": ".delta.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "akaalb_www_alb": {
+   "knownAs": "Ensures your connection remains stable by routing requests to the same server during your session.",
+   "domain": "www.delta.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "AMCV_F0E65E09512D2CC50A490D4D%40AdobeOrg": {
+   "knownAs": "This cookie identifies a unique visitor for Adobe Experience Cloud solutions to enable site analytics and personalization.",
+   "domain": ".delta.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "bm_mi": {
+   "knownAs": "Used by Akamai Bot Manager to distinguish between human users and automated bots to prevent malicious activity.",
+   "domain": ".delta.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "dtSa": {
+   "knownAs": "Tracks user actions across pages to monitor and improve website performance and technical stability.",
+   "domain": ".delta.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "Homepage": {
+   "knownAs": "Maintains navigation state and ensures the homepage loads correctly for the user.",
+   "domain": "www.delta.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "kndctr_F0E65E09512D2CC50A490D4D_AdobeOrg_identity": {
+   "knownAs": "A unique identity cookie used by Adobe Experience Platform to track visitor behavior and enable site analytics.",
+   "domain": ".delta.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "mbox": {
+   "knownAs": "Used by Adobe Target to deliver personalized content and conduct A/B testing experiments to improve site performance.",
+   "domain": ".delta.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "rxVisitor": {
+   "knownAs": "This Dynatrace cookie stores an anonymous ID to monitor website performance and detect technical errors across user sessions.",
+   "domain": ".delta.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "rxvt": {
+   "knownAs": "A Dynatrace performance cookie used to track session duration and identify session expiration.",
+   "domain": ".delta.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "uuid": {
+   "knownAs": "This cookie stores a unique identifier used to recognize return visitors and optimize the relevance of marketing campaigns.",
+   "domain": ".delta.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "xssid": {
+   "knownAs": "Maintains a secure user session to support site navigation and booking functionality.",
+   "domain": ".delta.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "__cheq_tld_1785669672660": {
+   "knownAs": "This cookie is used by CHEQ cybersecurity to identify and prevent automated bot attacks and fraudulent activity.",
+   "domain": "www.delta.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "AWSALB": {
+   "knownAs": "Used by Amazon Web Services to maintain user session stickiness and balance traffic across servers.",
+   "domain": "signin.delta.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "AWSALBCORS": {
+   "knownAs": "This cookie is managed by Amazon Web Services and is used for load balancing to ensure a consistent user session.",
+   "domain": "signin.delta.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "com.adobe.alloy.getTld": {
+   "knownAs": "Used by the Adobe Experience Platform Web SDK to determine the correct domain for storing first-party cookies.",
+   "domain": "www.delta.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "cookietest": {
+   "knownAs": "This cookie is used to check if the browser is configured to allow cookies.",
+   "domain": "www.delta.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "DELTA_ENSIGHTEN_PRIVACY_Advertising": {
+   "knownAs": "Stores your preference regarding the use of advertising and marketing technologies on this website.",
+   "domain": "www.delta.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "DELTA_ENSIGHTEN_PRIVACY_EnhancedFunctionality": {
+   "knownAs": "Stores user consent preferences for enhanced website features through the Ensighten privacy manager.",
+   "domain": "www.delta.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "DELTA_ENSIGHTEN_PRIVACY_FirstPartyAnalytics": {
+   "knownAs": "Stores user consent preferences specifically for first-party analytics tracking via the Ensighten platform.",
+   "domain": "www.delta.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "DELTA_ENSIGHTEN_PRIVACY_ThirdPartyAnalytics": {
+   "knownAs": "Stores your consent preferences to determine if third-party analytics scripts are permitted to run.",
+   "domain": "www.delta.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "dlsite": {
+   "knownAs": "Used by the website to manage site localization and regional settings for the user's session.",
+   "domain": ".delta.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "dTValidationCookie": {
+   "knownAs": "Used by Dynatrace to manage the deployment of performance monitoring scripts and prevent server overload.",
+   "domain": "www.delta.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "EAM": {
+   "knownAs": "Used to manage secure access and user authentication sessions for signing in.",
+   "domain": "signin.delta.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "homepage-new-exp": {
+   "knownAs": "Remembers which version of the homepage you are seeing for website testing and optimization.",
+   "domain": "www.delta.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "kndctr_F0E65E09512D2CC50A490D4D_AdobeOrg_cluster": {
+   "knownAs": "Used by Adobe Experience Platform to route requests to the correct regional data center for session consistency.",
+   "domain": ".delta.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "mboxEdgeCluster": {
+   "knownAs": "Identifies the Adobe Target server cluster handling the session to ensure consistent and fast content delivery.",
+   "domain": ".delta.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "prefConf": {
+   "knownAs": "This cookie stores website preference configurations such as language and regional settings to ensure the site displays correctly.",
+   "domain": ".delta.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "prfId": {
+   "knownAs": "Stores a first-party profile identifier used to maintain user preferences and session state.",
+   "domain": "www.delta.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "_fbp": {
+   "knownAs": "Used by Facebook to track website visits and deliver targeted advertisements.",
+   "domain": ".directv.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "dtvprodsession": {
+   "knownAs": "Maintains the user's session state and site functionality for the DirecTV production environment.",
+   "domain": ".directv.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "optimizelyEndUserId": {
+   "knownAs": "A unique identifier used by Optimizely to maintain a consistent experience for users during website A/B testing and performance analysis.",
+   "domain": ".directv.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "QuantumMetricSessionID": {
+   "knownAs": "Maintains a unique session ID to help the website analyze and improve the user experience.",
+   "domain": ".directv.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "user_id": {
+   "knownAs": "Stores a unique identifier to maintain secure user sessions and support website performance improvements.",
+   "domain": "www.directv.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "_gcl_au": {
+   "knownAs": "Used by Google to track and store conversions for advertising attribution purposes.",
+   "domain": ".directv.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "_pin_unauth": {
+   "knownAs": "This cookie is set by Pinterest to track website usage and enable targeted advertising for users not logged into Pinterest.",
+   "domain": ".directv.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "_uetsid": {
+   "knownAs": "Used by Microsoft Bing Ads to track visitor behavior and measure the performance of advertising campaigns.",
+   "domain": ".directv.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "_uetvid": {
+   "knownAs": "Used by Microsoft Bing Ads to track user visits across websites for advertising and performance measurement.",
+   "domain": ".directv.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "QuantumMetricUserID": {
+   "knownAs": "Stores a unique user identifier used by Quantum Metric to analyze website interactions and improve the user experience.",
+   "domain": ".directv.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "sm_uuid": {
+   "knownAs": "Stores a unique ID used for visitor identity resolution across devices and marketing automation.",
+   "domain": ".directv.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "currentZipcode": {
+   "knownAs": "Remembers the user's current zip code to provide localized channel listings and service availability.",
+   "domain": ".directv.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "edgeScapeZip": {
+   "knownAs": "Stores geographic information derived from the user's IP address to ensure regional content availability.",
+   "domain": "www.directv.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "FPLC": {
+   "knownAs": "Used by Google to link visitor sessions across different domains for analytics and marketing attribution.",
+   "domain": ".directv.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "invoca_revision": {
+   "knownAs": "Stores a configuration version number to ensure call-tracking settings and dynamic phone numbers remain current.",
+   "domain": "www.directv.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "invoca_session": {
+   "knownAs": "Maintains a session identifier to link website visits to phone calls for marketing attribution.",
+   "domain": ".directv.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "_ga_LEXYQWQ1NF": {
+   "knownAs": "This cookie is used by Google Analytics to persist session state and distinguish unique visitors.",
+   "domain": ".directv.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "_rdt_uuid": {
+   "knownAs": "This cookie is associated with the Reddit Pixel and is used to measure advertisement performance and deliver personalized ads based on user interactions.",
+   "domain": ".directv.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "AB_IDPROOT": {
+   "knownAs": "Maintains identity and session information for authentication and account security purposes.",
+   "domain": ".directv.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "ab.storage.deviceId.795e2050-a249-4266-b25b-b6882659271a": {
+   "knownAs": "Stores a unique device identifier to support personalized engagement and analytics through the Braze platform.",
+   "domain": ".directv.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "ab.storage.sessionId.795e2050-a249-4266-b25b-b6882659271a": {
+   "knownAs": "Stores a unique session identifier to track user interactions and engagement through the Braze marketing platform.",
+   "domain": ".directv.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "ab.storage.userId.795e2050-a249-4266-b25b-b6882659271a": {
+   "knownAs": "Stores a unique, pseudonymous user identifier to track website usage and performance across different sessions.",
+   "domain": ".directv.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "akaas_DCPLIVE": {
+   "knownAs": "Used by Akamai infrastructure to optimize and accelerate the delivery of live streaming content.",
+   "domain": "www.directv.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "DCPAPP": {
+   "knownAs": "This cookie is used to support the technical operation and performance of the DirecTV web application.",
+   "domain": "www.directv.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "dtm_consent": {
+   "knownAs": "Stores user consent preferences and signals for Epsilon Dotomi advertising services.",
+   "domain": ".directv.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "dtvprodcdPersisted": {
+   "knownAs": "Collects behavioral data via the Celebrus platform to analyze user journeys and improve website performance.",
+   "domain": "celebrus.directv.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "dtvprodcdSession": {
+   "knownAs": "This cookie maintains a unique session identifier for the Celebrus analytics platform to track user interactions.",
+   "domain": "celebrus.directv.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "dtvprodpersisted": {
+   "knownAs": "Maintains persistent session or account information to ensure site functionality remains consistent across visits.",
+   "domain": ".directv.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "FPGSID": {
+   "knownAs": "Used by Google to identify unique visitor sessions for server-side analytics and performance monitoring.",
+   "domain": ".directv.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "FPID": {
+   "knownAs": "Registers a unique ID used to generate statistical data on how the visitor uses the website.",
+   "domain": ".directv.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "IDPROOT-TEST": {
+   "knownAs": "Used by the website's identity provider to test and verify browser connectivity for secure login services.",
+   "domain": ".directv.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "pageSessionId": {
+   "knownAs": "Maintains a unique session ID to track user state across the current page or session.",
+   "domain": "www.directv.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "rsnFee": {
+   "knownAs": "Stores information regarding Regional Sports Network (RSN) fees to display accurate pricing based on your location.",
+   "domain": ".directv.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "salesPod": {
+   "knownAs": "Manages your progress and configuration state through the service selection and checkout process.",
+   "domain": "www.directv.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "shop": {
+   "knownAs": "Maintains the state of the user's shopping session or local service availability.",
+   "domain": ".directv.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "userVisitCount": {
+   "knownAs": "Maintains a count of user visits to track engagement with the site's video player.",
+   "domain": ".directv.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "utag_main__pn": {
+   "knownAs": "Stores the number of pages viewed by the user during the current session for website optimization and performance measurement.",
+   "domain": ".directv.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "utag_main__se": {
+   "knownAs": "Tracks the number of events triggered during a single browsing session to help optimize website performance.",
+   "domain": ".directv.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "utag_main__ss": {
+   "knownAs": "This cookie is used by the Tealium tag management system to identify the start of a user session for site optimization and analytics.",
+   "domain": ".directv.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "utag_main__st": {
+   "knownAs": "This cookie is part of the Tealium tag management system and stores a timestamp to manage and sequence user sessions.",
+   "domain": ".directv.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "utag_main_ses_id": {
+   "knownAs": "Maintains a unique session identifier to help the Tealium tag management system group user interactions during a single visit.",
+   "domain": ".directv.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "x-dtv-edgescape": {
+   "knownAs": "This cookie stores geographic location data used to deliver regional programming and ensure service compliance.",
+   "domain": ".directv.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "__cf_bm": {
+   "knownAs": "This cookie is used by Cloudflare to distinguish between humans and bots to protect the website.",
+   "domain": "www.directv.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "__cflb": {
+   "knownAs": "Used by Cloudflare to provide load balancing and ensure session persistence by routing requests to the same server.",
+   "domain": "www.directv.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "CIP": {
+   "knownAs": "This cookie is used by the website to maintain user session state and support site performance.",
+   "domain": "www.directv.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "csrf": {
+   "knownAs": "Maintains a security token to prevent Cross-Site Request Forgery (CSRF) attacks and protect the site.",
+   "domain": "www.directv.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "optimizelyDomainTestCookie": {
+   "knownAs": "A technical check used by Optimizely to verify if the browser is configured to allow cookies for website experimentation.",
+   "domain": "www.directv.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "optimizelyOptOut": {
+   "knownAs": "Stores the user's preference to opt out of Optimizely tracking and website experimentation.",
+   "domain": "www.directv.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "QUARK": {
+   "knownAs": "Technical cookie used for internal site delivery and session management on DIRECTV.",
+   "domain": "www.directv.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "Sierramigration": {
+   "knownAs": "This cookie is used to facilitate the technical migration of user accounts or session data between platform systems.",
+   "domain": ".directv.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "utag_main__sn": {
+   "knownAs": "Tracks the number of sessions for a unique visitor to support site analytics and tag management.",
+   "domain": ".directv.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "barometric[idfa]": {
+   "knownAs": "Stores an advertising identifier (IDFA) used by Barometric/Claritas to measure the effectiveness of marketing campaigns and attribute conversions.",
+   "domain": "www.directv.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "_cs_root-domain": {
+   "knownAs": "This transient cookie is used by ContentSquare to identify the root domain for correctly setting other analytics cookies.",
+   "domain": "www.fidelity.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "_cs_c": {
+   "knownAs": "Stores your cookie consent preferences to ensure your privacy choices are respected on future visits.",
+   "domain": ".fidelity.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "_cs_ex": {
+   "knownAs": "Used by Contentsquare to exclude specific visitors from being tracked by their analytics service.",
+   "domain": ".fidelity.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "_cs_same_site": {
+   "knownAs": "Technical cookie used by Contentsquare to verify browser support for secure cookie attributes.",
+   "domain": "www.fidelity.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "cvi": {
+   "knownAs": "Stores a unique visitor identifier to track the effectiveness of marketing campaigns and advertisements.",
+   "domain": ".fidelity.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "QSI_HistorySession": {
+   "knownAs": "Stores page navigation history during the current session to trigger relevant Qualtrics surveys and site improvements.",
+   "domain": ".fidelity.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "_dd_s": {
+   "knownAs": "Used by Datadog to monitor website performance and group session-related events for error tracking.",
+   "domain": "www.fidelity.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "_ga_GL9JN8SMCE": {
+   "knownAs": "A Google Analytics 4 cookie used to maintain session state and track website usage.",
+   "domain": ".fidelity.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "AMCV_EDCF01AC512D2B770A490D4C%40AdobeOrg": {
+   "knownAs": "This cookie is set by Adobe Experience Cloud to identify a unique visitor across different Adobe applications.",
+   "domain": ".fidelity.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "analytics_id": {
+   "knownAs": "Collects data on user behavior to help the site operator improve website performance and features.",
+   "domain": ".fidelity.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "dmt_a": {
+   "knownAs": "Internal identifier used for digital marketing analytics and website performance measurement.",
+   "domain": "www.fidelity.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "dmt_d": {
+   "knownAs": "This cookie is used by Fidelity's digital marketing systems to measure website performance and marketing effectiveness.",
+   "domain": ".fidelity.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "dmt_g": {
+   "knownAs": "Internal identifier used for digital marketing tag orchestration and site performance measurement.",
+   "domain": ".fidelity.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "dmt_p": {
+   "knownAs": "Supports internal site management and performance measurement within the Fidelity domain.",
+   "domain": "www.fidelity.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "dmt_r": {
+   "knownAs": "This cookie is used by Fidelity to record referral information and measure marketing effectiveness.",
+   "domain": "www.fidelity.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "dmt_s": {
+   "knownAs": "This cookie is used to manage website session state and internal performance.",
+   "domain": "www.fidelity.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "dmt_t": {
+   "knownAs": "Internal cookie used for managing website tags and site measurement.",
+   "domain": ".fidelity.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "fid_dmt_x": {
+   "knownAs": "Used by Fidelity for internal data management and website performance analysis.",
+   "domain": ".dmt.fidelity.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "MC": {
+   "knownAs": "This cookie is used to collect anonymous information about how visitors interact with the site for analytics and measurement.",
+   "domain": ".fidelity.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "s_pers": {
+   "knownAs": "This cookie is set by Adobe Analytics to store persistent website usage data and performance metrics across browser sessions.",
+   "domain": ".fidelity.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "s_sess": {
+   "knownAs": "A session-based Adobe Analytics cookie used to store temporary data for measuring site performance and navigation.",
+   "domain": ".fidelity.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "AMCVS_EDCF01AC512D2B770A490D4C%40AdobeOrg": {
+   "knownAs": "A session-based cookie from the Adobe Experience Cloud used to initialize the visitor identity service.",
+   "domain": ".fidelity.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "at_check": {
+   "knownAs": "Confirms if the browser supports cookies to enable Adobe Target experimentation and personalization.",
+   "domain": ".fidelity.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "_cq_s": {
+   "knownAs": "Used by CHEQ to protect the site from automated bot activity and fraud.",
+   "domain": ".fidelity.co.uk",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "kampyle_userid": {
+   "knownAs": "Stores a unique identifier used to manage and track customer feedback surveys and site experience data.",
+   "domain": "www.fidelity.co.uk",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "Tld-kampyleUserPercentile": {
+   "knownAs": "Used by Medallia to manage user feedback surveys and collect website experience analytics.",
+   "domain": ".fidelity.co.uk",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview",
+   "groupedBy": "pattern_family"
+  },
+  "Tld-kampyleSessionPageCounter": {
+   "knownAs": "Used by Medallia to manage user feedback surveys and collect website experience analytics.",
+   "domain": ".fidelity.co.uk",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview",
+   "groupedBy": "pattern_family",
+   "classifiedAs": "Tld-kampyleUserPercentile"
+  },
+  "Tld-kampyleUserSessionsCount": {
+   "knownAs": "Used by Medallia to manage user feedback surveys and collect website experience analytics.",
+   "domain": ".fidelity.co.uk",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview",
+   "groupedBy": "pattern_family",
+   "classifiedAs": "Tld-kampyleUserPercentile"
+  },
+  "Tld-kampyleUserSession": {
+   "knownAs": "Manages user feedback sessions and surveys to help improve the website experience.",
+   "domain": ".fidelity.co.uk",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "_cq_duid": {
+   "knownAs": "Used by CHEQ AI to detect and prevent bot activity and fraudulent traffic on the website.",
+   "domain": ".fidelity.co.uk",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "_cq_suid": {
+   "knownAs": "Used by CHEQ AI to protect the website from malicious traffic and bots by distinguishing between human and automated visitors.",
+   "domain": ".fidelity.co.uk",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "_cq_session": {
+   "knownAs": "Supports cybersecurity measures by identifying bot traffic and preventing fraudulent interactions.",
+   "domain": ".fidelity.co.uk",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "da_lid": {
+   "knownAs": "Collects information on how visitors interact with the site, including heatmaps and session analytics via Decibel Insight.",
+   "domain": ".fidelity.co.uk",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "da_sid": {
+   "knownAs": "A session identifier used by Decibel Insight to analyze user behavior and improve website usability.",
+   "domain": ".fidelity.co.uk",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "FIDELITYUK_ENSIGHTEN_PRIVACY_Performance": {
+   "knownAs": "Stores the user's consent preference for performance and analytics tracking.",
+   "domain": ".fidelity.co.uk",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "FIDELITYUK_ENSIGHTEN_PRIVACY_Targeting_or_advertising": {
+   "knownAs": "Remembers your consent preference for advertising and targeting cookies to ensure your privacy choices are respected.",
+   "domain": ".fidelity.co.uk",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "s_ppv": {
+   "knownAs": "Measures the percentage of a page viewed by the user to understand content engagement.",
+   "domain": ".fidelity.co.uk",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "s_ppvl": {
+   "knownAs": "This cookie records how much of a page a user has viewed for website optimization purposes.",
+   "domain": ".fidelity.co.uk",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "_dp": {
+   "knownAs": "This cookie is used by Adobe Audience Manager to check if the browser supports cookies for targeted advertising purposes.",
+   "domain": "www.fidelity.co.uk",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "AMCV_66BF762056E853147F000101%40AdobeOrg": {
+   "knownAs": "A unique identifier used by Adobe Experience Cloud to recognize a visitor across various Adobe applications.",
+   "domain": ".fidelity.co.uk",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "_cc_cc": {
+   "knownAs": "Collects behavioral data to build user profiles for targeted advertising and audience segmentation.",
+   "domain": "www.fidelity.co.uk",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "everest_session_v2": {
+   "knownAs": "Used by Adobe Advertising Cloud to track advertisement interactions and deliver targeted marketing content.",
+   "domain": "www.fidelity.co.uk",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "FIDELITYUK_ENSIGHTEN_PRIVACY_euconsent-v2": {
+   "knownAs": "Stores your privacy preferences and consent choices to ensure the website respects your data protection settings.",
+   "domain": ".fidelity.co.uk",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "FIDELITYUK_ENSIGHTEN_PRIVACY_Functionality": {
+   "knownAs": "Stores your privacy and consent preferences regarding the use of functional features on this website.",
+   "domain": ".fidelity.co.uk",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "s_cc": {
+   "knownAs": "Determines if cookies are enabled in the browser for Adobe Analytics measurement.",
+   "domain": ".fidelity.co.uk",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "_pxhd": {
+   "knownAs": "Used for security and fraud prevention to distinguish human users from automated bots.",
+   "domain": "www.walmart.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "ACID": {
+   "knownAs": "This cookie is a unique identifier used for identifying users for advertising and marketing purposes.",
+   "domain": ".www.walmart.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "assortmentStoreId": {
+   "knownAs": "Stores an identifier for your selected or local Walmart store to show accurate inventory and pricing.",
+   "domain": "www.walmart.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "bstc": {
+   "knownAs": "This cookie is used to maintain secure browser sessions and help prevent fraudulent activity on the site.",
+   "domain": ".walmart.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "hasACID": {
+   "knownAs": "This cookie is used to indicate the presence of an account or session identifier to maintain website functionality.",
+   "domain": ".www.walmart.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "hasLocData": {
+   "knownAs": "Indicates whether the website has stored location data to show local store availability.",
+   "domain": "www.walmart.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "isoLoc": {
+   "knownAs": "Remembers your regional location or selected store to show local pricing and availability.",
+   "domain": ".www.walmart.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "sod": {
+   "knownAs": "Internal session or operational cookie used to maintain site functionality on Walmart.com.",
+   "domain": ".walmart.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "vtc": {
+   "knownAs": "Used for internal visitor tracking and measuring the effectiveness of site content and conversions.",
+   "domain": ".walmart.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "xpa": {
+   "knownAs": "Supports site performance and internal experimentation to improve the user experience.",
+   "domain": ".walmart.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "xpm": {
+   "knownAs": "Used by the website to manage and deliver content and user experience features.",
+   "domain": ".walmart.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "_astc": {
+   "knownAs": "This cookie is used for security purposes to identify and prevent automated bot activity.",
+   "domain": "www.walmart.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "_shcc": {
+   "knownAs": "Used for technical site operations, including cache management and security integrity.",
+   "domain": "www.walmart.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "b30msc": {
+   "knownAs": "This cookie is used by Walmart to monitor and analyze user behavior for site performance and service optimization.",
+   "domain": "b.www.walmart.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "bsc": {
+   "knownAs": "Used by Walmart and advertising partners to track user behavior for ad selection and performance measurement.",
+   "domain": "b.www.walmart.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "btc": {
+   "knownAs": "Used by Walmart to track user interactions for site performance and targeted advertising.",
+   "domain": "b.www.walmart.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "exp-ck": {
+   "knownAs": "This cookie is used to manage and track internal website experiments and A/B testing variations.",
+   "domain": ".walmart.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "if_id": {
+   "knownAs": "This cookie is an identifier used for internal site analytics and marketing attribution.",
+   "domain": ".walmart.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "io_id": {
+   "knownAs": "Used for fraud prevention and device security to protect against malicious activity.",
+   "domain": ".walmart.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "xptc": {
+   "knownAs": "This cookie is used to track and attribute traffic originating from external marketing partners.",
+   "domain": ".walmart.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "xpth": {
+   "knownAs": "This cookie identifies specific page elements for tracking user interactions to support personalized shopping and advertising.",
+   "domain": ".walmart.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "xptwg": {
+   "knownAs": "Tracks site usage and marketing interactions to personalize the Walmart shopping experience.",
+   "domain": ".walmart.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "_intlbu": {
+   "knownAs": "Supports website localization by identifying the user's international business unit or region.",
+   "domain": "www.walmart.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "_m": {
+   "knownAs": "Collects data on user behavior to deliver personalized advertisements and measure marketing campaign performance.",
+   "domain": ".www.walmart.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "abqme": {
+   "knownAs": "This cookie is used for website experimentation and to measure the performance of site features.",
+   "domain": ".www.walmart.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "adblocked": {
+   "knownAs": "This cookie determines whether a visitor has ad-blocking software enabled to ensure the website functions correctly.",
+   "domain": "www.walmart.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "TS012768cf": {
+   "knownAs": "Used by the website's security and traffic management infrastructure to maintain secure user sessions and route traffic efficiently.",
+   "domain": ".www.walmart.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  },
+  "akavpau_p2": {
+   "knownAs": "Used by the Akamai Content Delivery Network to optimize website performance and speed up page loading.",
+   "domain": "www.walmart.com",
+   "source": "mcp",
+   "model": "gemini-3-flash-preview"
+  }
+ },
+ "updated": "2026-08-07",
+ "count": 225
+}
