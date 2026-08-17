@@ -23,7 +23,7 @@
 // That is the difference between "this value reached host X" and "this function
 // harvested the value and put it in a query string on line N of this file".
 
-import { createReadStream, openSync, readSync, closeSync } from "node:fs";
+import { stream, makeKeys, readPageUrl, idOf, ends, unwrap, valueOnly, parseJar, codeWindow, fromLineCol, decodeStack } from "./lib/graph-parse.mjs";
 
 const argv = process.argv.slice(2);
 const flag = (n, d) => { const i = argv.indexOf(n); return i !== -1 ? argv[i + 1] : d; };
@@ -38,84 +38,8 @@ if (!graphmlPath || !cookieName) {
   process.exit(1);
 }
 
-const un = s => s == null ? null : s
-  .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"')
-  .replace(/&#39;/g, "'").replace(/&apos;/g, "'").replace(/&amp;/g, "&");
-
-const readPageUrl = p => {
-  const fd = openSync(p, "r");
-  try {
-    const b = Buffer.alloc(262144);
-    const n = readSync(fd, b, 0, b.length, 0);
-    const m = b.toString("utf8", 0, n).match(/<url>([^<]*)<\/url>/);
-    return m ? m[1] : null;
-  } finally { closeSync(fd); }
-};
-
-async function* stream(path) {
-  const st = createReadStream(path, { encoding: "utf8" });
-  let buf = "";
-  const open = /<(node|edge|key)\b/g;
-  for await (const chunk of st) {
-    buf += chunk;
-    let consumed = 0; open.lastIndex = 0; let m;
-    while ((m = open.exec(buf)) !== null) {
-      const tag = m[1], start = m.index, close = `</${tag}>`;
-      let end = buf.indexOf(close, open.lastIndex), after;
-      if (end !== -1) after = end + close.length;
-      else {
-        const sc = buf.indexOf("/>", open.lastIndex), no = buf.indexOf("<", open.lastIndex);
-        if (sc !== -1 && (no === -1 || sc < no)) { after = sc + 2; end = -2; }
-        else break;
-      }
-      const raw = buf.slice(start, after), he = raw.indexOf(">");
-      yield { tag, head: raw.slice(0, he), body: end === -2 ? "" : raw.slice(he + 1, raw.length - close.length) };
-      consumed = after; open.lastIndex = after;
-    }
-    // Bound the carry buffer. Elements we are not interested in never match, so
-    // `consumed` can stay at 0 while megabytes of them stream past — the buffer then
-    // grows until it exceeds V8's maximum string length and the process dies. Keep only
-    // from the earliest unconsumed opening tag (an element may legitimately span chunks
-    // and be large); if there is no opening tag at all, keep just enough to catch a tag
-    // split across the boundary.
-    buf = buf.slice(consumed);
-    if (buf.length > 1 << 20) {
-      open.lastIndex = 0;
-      const nxt = open.exec(buf);
-      buf = nxt ? buf.slice(nxt.index) : buf.slice(-64);
-    }
-  }
-}
-
-const K = { edge: {}, node: {} };
-const key = h => {
-  const f = h.match(/for="(edge|node)"/), n = h.match(/attr\.name="([^"]*)"/), i = h.match(/id="(d\d+)"/);
-  if (f && n && i) K[f[1]][n[1]] = i[1];
-};
-const mk = kind => (body, name) => {
-  const id = K[kind][name];
-  if (!id || body == null) return null;
-  const m = body.match(new RegExp(`key="${id}">([\\s\\S]*?)</data>`));
-  return m ? un(m[1]) : null;
-};
-const eA = mk("edge"), nA = mk("node");
-const idOf = h => (h.match(/id="(n\d+)"/) || [])[1];
-const ends = h => [(h.match(/source="(n\d+)"/) || [])[1], (h.match(/target="(n\d+)"/) || [])[1]];
-const unwrap = v => {
-  if (v == null) return v;
-  if (v.length >= 2 && v[0] === '"' && v.at(-1) === '"') {
-    try { const p = JSON.parse(v); if (typeof p === "string") return p; } catch { return v.slice(1, -1); }
-  }
-  return v;
-};
-const valueOnly = v => v == null ? v : String(v).split(";")[0].trim();
-const parseJar = s => {
-  const o = [];
-  if (!s) return o;
-  for (const p of s.split(";")) { const e = p.indexOf("="); if (e === -1) continue;
-    const n = p.slice(0, e).trim(), v = p.slice(e + 1).trim(); if (n) o.push([n, v]); }
-  return o;
-};
+// Shared streaming + parsing primitives now live in lib/graph-parse.mjs. One key table per run.
+const { key, nA, eA } = makeKeys();
 
 // ---------------------------------------------------------------------------
 const pageUrl = readPageUrl(graphmlPath);
@@ -164,38 +88,9 @@ const scriptUrl = sn => {
   return u || `${pageUrl} (inline)`;
 };
 
-// byte offset -> {line, col, excerpt}
-const at = (src, off, ctx = CTX) => {
-  if (src == null || off == null || !Number.isFinite(off)) return null;
-  const o = Math.max(0, Math.min(off, src.length));
-  const line = src.slice(0, o).split("\n").length;
-  const col = o - (src.lastIndexOf("\n", o - 1) + 1);
-  return { line, col, offset: o,
-    before: src.slice(Math.max(0, o - ctx), o),
-    after: src.slice(o, Math.min(src.length, o + ctx)) };
-};
-// line/col -> byte offset (for stack frames, which are 0-based)
-const fromLineCol = (src, line, col) => {
-  if (src == null) return null;
-  const lines = src.split("\n");
-  if (line < 0 || line >= lines.length) return null;
-  let off = 0;
-  for (let i = 0; i < line; i++) off += lines[i].length + 1;
-  return off + Math.max(0, Math.min(col, lines[line].length));
-};
-
-const decodeStack = raw => {
-  if (!raw) return [];
-  let o; try { o = JSON.parse(raw); } catch { return []; }
-  const out = [];
-  const walk = (st, depth) => {
-    if (!st) return;
-    for (const f of st.callFrames || []) out.push({ ...f, async: depth > 0 });
-    if (st.parent) walk(st.parent, depth + 1);
-  };
-  walk(o, 0);
-  return out;
-};
+// byte offset -> {line, col, offset, before, after} — symmetric window via the shared helper.
+// (fromLineCol + decodeStack are imported from lib/graph-parse.mjs.)
+const at = (src, off, ctx = CTX) => codeWindow(src, off, ctx);
 const frameCode = f => {
   const sn = byV8.get(String(f.scriptId));
   if (sn == null) return null;
