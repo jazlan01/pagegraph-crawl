@@ -7,3 +7,12 @@ test/output/
 # crawl artifacts and captured real-site dumps (large / may contain private data)
 output/
 analysis/runs/
+
+# Local secrets — never commit. Loaded via `node --env-file=.env` or `set -a; source .env; set +a`.
+.env
+.env.*
+!.env.example
+
+# Python bytecode and truncated renderer output
+__pycache__/
+*.graphml.partial
