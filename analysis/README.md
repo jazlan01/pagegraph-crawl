@@ -416,6 +416,11 @@ accuracy; `customer_id 0` is a floor on the MCP) are in `output/audit-2026-08-02
 
 ## Archiving graphs
 
+Full write-up with measured numbers and the limitations: **[graph-compression.md](graph-compression.md)**.
+Short version: the corpus went **21.2 GiB → 42.1 MiB (516×)** losslessly, three tools still cannot
+read archives (`cookie-sites.mjs`, `edge-stacks.mjs`, `prune-graph.py`), and shell globs on
+`*.graphml` silently match nothing once a directory is reclaimed.
+
 ```bash
 analysis/archive-graph.sh output analysis/runs     # compress; originals kept
 analysis/archive-graph.sh --reclaim output         # delete originals that re-verify
