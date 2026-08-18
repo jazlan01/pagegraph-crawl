@@ -80,7 +80,8 @@ design choice: see `output/audit-2026-08-02/mcp-headtohead.md`.
 |---|---|
 | `run-consent-matrix.sh` | crawls every site under three consent states (`gpc-only`, `accept-all`, `reject-all`) and prunes as it goes |
 | `plan-probe-targets.mjs` | turns a pass-1 crawl into a `--probe` pass-2 breakpoint plan |
-| `prune-graph.py` | stream-prune a graphml (truncates stack traces to 25 frames; ~36–95% smaller). Verified lossless for `timestamp`, `request id`, `key`, `value`, `edge type`, `script position` |
+| `prune-graph.py` | stream-prune a graphml (truncates stack traces to 25 frames; ~36–95% smaller). Verified lossless for `timestamp`, `request id`, `key`, `value`, `edge type`, `script position`. This is for making a graph tractable to **analyse** — do not reach for it before archiving, see [Archiving graphs](#archiving-graphs) |
+| `archive-graph.sh` | losslessly compress graphs for storage, ~180×, nothing discarded. `--reclaim` deletes an original only after re-verifying its archive |
 | `gephi-export.mjs` | pre-styled GEXF storage subgraph — *orphaned; nothing references it* |
 
 ### `lib/`
@@ -411,6 +412,57 @@ node analysis/mcp-headtohead.mjs output/audit-2026-08-02 --out .../mcp-headtohea
 The two merges are deliberately separate: identity prose must never acquire a label's authority,
 and a label must never inherit the name-lookup caveat. Results and method limits (agreement, not
 accuracy; `customer_id 0` is a floor on the MCP) are in `output/audit-2026-08-02/mcp-headtohead.md`.
+
+## Archiving graphs
+
+```bash
+analysis/archive-graph.sh output analysis/runs     # compress; originals kept
+analysis/archive-graph.sh --reclaim output         # delete originals that re-verify
+```
+
+Writes `<graph>.graphml.zst` plus a `<graph>.graphml.archive.json` manifest recording exact byte
+counts, the source SHA-256, and the restore command.
+
+### Restoring — the obvious command does not work
+
+```bash
+zstd -d --long=31 page_graph_....graphml.zst
+```
+
+A plain `zstd -d` **fails**: `Frame requires too much memory for decoding`. The archive's window
+exceeds zstd's default 128 MiB decode budget, so `--long=31` is required. zstd names the flag in
+its error, but the number it suggests differs per file — `--long=31` is the upper bound and always
+works. The analysis scripts cannot read `.zst` at all; decompress first.
+
+### Do not prune before archiving
+
+This is the counter-intuitive part, so the numbers, measured on walmart (1,143,132,196 B):
+
+| archived | compressed | cost |
+|---|---:|---|
+| raw | 6,206,822 | nothing |
+| `prune-graph.py --max-frames 25` | 5,998,152 | 646 MB and 45% of every call frame, permanently |
+| `--drop-stacks --drop-dom-edges` | 4,717,552 | all 110,905 traces + 54,268 edges destroyed |
+
+Pruning first buys **3.4%** and cannot be undone. The edge `stack trace` attribute is 91.4% of
+walmart and 99.2% of delta, but only because the engine stores each edge's stack as its own
+`std::string` with no interning — 110,905 stacks on walmart are just **14,013 distinct values**.
+A compressor exploits that far better than truncation does.
+
+### Why `--long=31` and not gzip
+
+Stack values average 9,423 B and repeat at a median distance of 12,331 B, so gzip's 32 KB window
+holds about three of them and **36.2% of repeats are further apart than it can see**:
+
+| codec | bytes | ratio | wall clock |
+|---|---:|---:|---:|
+| `gzip -9` | 26,602,721 | 42.97× | 6.8 s |
+| `zstd -19` | 7,292,402 | 156.8× | 9.0 s |
+| **`zstd -19 --long=31`** | **6,206,822** | **184.2×** | **8.9 s** |
+| `xz -9` | 6,681,752 | 171.1× | 9.2 s |
+
+Note this is *not* what the crawler's `-z`/`--compress` flag does — that is gzip, applied at crawl
+time, and its output is likewise unreadable by every script here.
 
 ## Keys and environment
 
