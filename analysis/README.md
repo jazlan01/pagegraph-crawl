@@ -78,7 +78,7 @@ design choice: see `output/audit-2026-08-02/mcp-headtohead.md`.
 |---|---|
 | `run-consent-matrix.sh` | crawls every site under three consent states (`gpc-only`, `accept-all`, `reject-all`) and prunes as it goes |
 | `plan-probe-targets.mjs` | turns a pass-1 crawl into a `--probe` pass-2 breakpoint plan |
-| `prune-graph.py` | stream-prune a graphml (truncates stack traces to 25 frames; ~36–95% smaller). Verified lossless for `timestamp`, `request id`, `key`, `value`, `edge type`, `script position`. This is for making a graph tractable to **analyse** — do not reach for it before archiving, see [Archiving graphs](#archiving-graphs) |
+| `prune-graph.py` | stream-prune a graphml (truncates stack traces to 25 frames; ~36–95% smaller). Reads plain or archived input. Verified lossless for `timestamp`, `request id`, `key`, `value`, `edge type`, `script position`. This is for making a graph tractable to **analyse** — do not reach for it before archiving, see [Archiving graphs](#archiving-graphs) |
 | `archive-graph.sh` | losslessly compress graphs for storage, ~180×, nothing discarded. `--reclaim` deletes an original only after re-verifying its archive |
 | `gephi-export.mjs` | pre-styled GEXF storage subgraph — *orphaned; nothing references it* |
 

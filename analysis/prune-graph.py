@@ -34,13 +34,117 @@ Usage:
     python3 prune-graph.py <in.graphml> <out.graphml> [--max-frames 25]
                            [--drop-stacks] [--drop-dom-edges]
 
+The input may be plain, or an archive written by `archive-graph.sh` (`.graphml.zst`) or the
+crawler's `-z` (`.graphml.gz`) -- pass the plain `<name>.graphml` path either way and it is
+resolved to whatever is on disk, mirroring `analysis/lib/graph-source.mjs`. Decompression is
+streamed, never staged to a temp file: a 4 MB archive expands to 6.6 GB.
+
+Output is always plaintext. Pruning is an analysis-time step and the pruned graph is what you
+then analyse; if you want it archived, run `archive-graph.sh` over it afterwards so it gets the
+manifest and the SHA-256 round-trip proof that authorises `--reclaim` to delete anything.
+
 Streaming via xml.sax (read) + XMLGenerator (write); constant memory (~1 element).
 """
-import sys, os, json, argparse
+import sys, os, json, argparse, gzip, subprocess, contextlib
 import xml.sax
 from xml.sax.saxutils import XMLGenerator
 from xml.sax.xmlreader import AttributesImpl
 from collections import Counter
+
+# Must match archive-graph.sh's --long=31. Archives declare a 2 GB window, which is over the
+# default decode budget, so without this the decoder refuses with "Frame requires too much
+# memory for decoding" -- the same refusal `zstd -d` gives without --long=31.
+ZSTD_WINDOW_LOG_MAX = 31
+
+
+def resolve_graph_path(path):
+    """Accept a graph path in whatever form it exists on disk (plain, .zst, .gz)."""
+    if os.path.exists(path):
+        return path
+    for ext in (".zst", ".gz"):
+        if os.path.exists(path + ext):
+            return path + ext
+    for ext in (".zst", ".gz"):
+        if path.endswith(ext) and os.path.exists(path[: -len(ext)]):
+            return path[: -len(ext)]
+    sys.exit(f"graph not found: {path}\n"
+             f"  Looked for it plain, .zst and .gz. An archived graph sits beside its "
+             f".archive.json manifest.")
+
+
+class _CountingReader:
+    """A binary stream that records how many bytes it actually handed to the parser.
+
+    The stats line used to divide by os.path.getsize(input). On an archive that is the
+    COMPRESSED size, so "% of original" came out wildly above 100%. Counting what the parser
+    consumes gives the true uncompressed input size for every input form.
+    """
+
+    def __init__(self, raw):
+        self._raw = raw
+        self.count = 0
+
+    def read(self, n=-1):
+        b = self._raw.read(n)
+        self.count += len(b)
+        return b
+
+    def close(self):
+        # xml.sax closes the source itself, so this can be a second close.
+        try:
+            self._raw.close()
+        except Exception:
+            pass
+
+
+@contextlib.contextmanager
+def open_graph(path):
+    """Yield (resolved_path, reader) for a graph in any stored form."""
+    resolved = resolve_graph_path(path)
+    proc = None
+
+    if resolved.endswith(".gz"):
+        raw = gzip.open(resolved, "rb")
+    elif resolved.endswith(".zst"):
+        try:
+            # Python 3.14+ (PEP 784). No third-party dependency.
+            from compression.zstd import ZstdFile, DecompressionParameter
+            raw = ZstdFile(resolved, options={
+                DecompressionParameter.window_log_max: ZSTD_WINDOW_LOG_MAX})
+        except ImportError:
+            # Older interpreters: pipe the zstd CLI, which archive-graph.sh already requires.
+            try:
+                proc = subprocess.Popen(
+                    ["zstd", "-dc", f"--long={ZSTD_WINDOW_LOG_MAX}", resolved],
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            except FileNotFoundError:
+                sys.exit(
+                    f"this Python ({sys.version.split()[0]}) has no compression.zstd (needs "
+                    f"3.14+) and zstd is not on PATH, so archived graphs cannot be read.\n"
+                    f"  Install zstd (brew install zstd) or run with a 3.14+ interpreter.")
+            raw = proc.stdout
+    else:
+        raw = open(resolved, "rb")
+
+    reader = _CountingReader(raw)
+    try:
+        yield resolved, reader
+    finally:
+        reader.close()
+        if proc is not None:
+            rc = proc.wait()
+            err = (proc.stderr.read().decode("utf-8", "replace").strip()
+                   if proc.stderr else "")
+            if proc.stderr:
+                proc.stderr.close()
+            # SIGPIPE (-13) is our own doing: aborting the parse early closes the pipe under
+            # zstd. Ignore that. Any OTHER non-zero exit is a real decompression failure, and
+            # is reported even when the parse also raised -- because it is the *cause*. A
+            # corrupt archive otherwise surfaces only as "no element found", which says
+            # nothing about what actually went wrong.
+            if rc not in (0, -13):
+                sys.exit(f"zstd failed decompressing {resolved} (exit {rc})"
+                         + (f":\n  {err}" if err else ""))
 
 DROP_EDGE_TYPES = {
     "set attribute", "delete attribute",
@@ -214,12 +318,16 @@ def main():
         h = Pruner(fh, a.max_frames, a.drop_stacks, a.drop_dom_edges)
         p = xml.sax.make_parser()
         p.setContentHandler(h)
-        with open(a.input, "rb") as f:
-            p.parse(f)
+        with open_graph(a.input) as (resolved, reader):
+            p.parse(reader)
+            si = reader.count
 
-    si, so = os.path.getsize(a.input), os.path.getsize(a.output)
-    print(f"in : {mb(si)}  {a.input}")
-    print(f"out: {mb(so)}  {a.output}   ({100*so/si:.1f}% of original, -{mb(si-so)})")
+    so = os.path.getsize(a.output)
+    compressed = resolved.endswith((".zst", ".gz"))
+    print(f"in : {mb(si)}  {resolved}"
+          + (f"  (decompressed; {mb(os.path.getsize(resolved))} on disk)" if compressed else ""))
+    print(f"out: {mb(so)}  {a.output}   ({100*so/si:.1f}% of original, -{mb(si-so)})"
+          if si else f"out: {mb(so)}  {a.output}")
     if h.stack_key is None:
         print("WARNING: no edge attribute named 'stack trace' found -- nothing truncated")
     print(f"nodes kept: {h.nodes:,}   edges kept: {sum(h.kept_e.values()):,}")

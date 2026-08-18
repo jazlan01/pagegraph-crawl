@@ -90,16 +90,24 @@ archives declare — not the graph being buffered.
 
 ## Limitations
 
-### `prune-graph.py` cannot read archives
+### Tools that could not read archives — resolved
 
-It opens the input path directly, so it fails on a `.zst` — and since no plaintext `.graphml`
-remains anywhere in the repo, it currently cannot run on anything at all.
+Three tools originally failed on archived graphs. All three are now dealt with:
 
-`cookie-sites.mjs` and `edge-stacks.mjs` had the same problem for a different reason — both used
-`readFileSync`, so they were already failing on 7 of the 15 graphs (every client capture) before
-archiving existed, because V8 caps a string near 512 MB. Both were **deleted in Aug 2026** and their
-references repointed at the streaming replacements that already covered them: `cookie-writes.mjs`
-(writes, deletes, `writeSpecs`) plus `cookie-reads.mjs` (read sites), and `edge-stacks-stream.mjs`.
+- **`cookie-sites.mjs` and `edge-stacks.mjs` — deleted (Aug 2026).** Their problem was not
+  archiving: both used `readFileSync`, so they were already failing on 7 of the 15 graphs (every
+  client capture) because V8 caps a string near 512 MB. References were repointed at the streaming
+  replacements that already covered them — `cookie-writes.mjs` (writes, deletes, `writeSpecs`) plus
+  `cookie-reads.mjs` (read sites), and `edge-stacks-stream.mjs`.
+- **`prune-graph.py` — fixed.** It now resolves and decompresses transparently, like the Node
+  side. On Python 3.14+ it uses `compression.zstd` from the standard library; on older
+  interpreters it pipes the `zstd` CLI, which `archive-graph.sh` already requires. Verified that
+  all four input forms — stdlib zstd, an explicit `.zst` path, the CLI fallback under Python 3.9,
+  and plaintext — produce byte-identical output.
+
+Its stats line was also wrong on an archive: it divided by `os.path.getsize(input)`, the
+*compressed* size, so "% of original" would have read far above 100%. It now counts the bytes the
+parser actually consumes, which is right for every input form.
 
 ### Shell globs silently match nothing
 
