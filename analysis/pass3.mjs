@@ -32,6 +32,7 @@
 // measured in — re-running them would confound the comparison with model nondeterminism.
 
 import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { isGraphPath } from "./lib/graph-source.mjs";
 import { basename, join } from "node:path";
 
 import { runHead, headAvailable, providerNames } from "./lib/llm-head-chat.mjs";
@@ -98,7 +99,7 @@ const refreshFeatures = (site) => {
   const dir = join(crawlRoot, site);
   let F = null;
   try {
-    const g = readdirSync(dir).find((x) => x.endsWith(".graphml"));
+    const g = readdirSync(dir).find((x) => isGraphPath(x));
     if (g) {
       log(`  re-deriving features for ${site}`);
       F = buildGraphFeatures(buildEvidence(join(dir, g), { log: () => {} }));

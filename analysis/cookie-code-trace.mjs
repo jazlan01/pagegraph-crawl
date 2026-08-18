@@ -42,7 +42,7 @@ if (!graphmlPath || !cookieName) {
 const { key, nA, eA } = makeKeys();
 
 // ---------------------------------------------------------------------------
-const pageUrl = readPageUrl(graphmlPath);
+const pageUrl = await readPageUrl(graphmlPath);
 let jar = null;
 const scripts = new Map();      // node id -> {url, src, v8, type}
 const byV8 = new Map();         // V8 scriptId -> node id

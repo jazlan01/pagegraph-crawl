@@ -15,12 +15,13 @@
 // pass (only execute / request edges) so it can run after the main extraction rather
 // than forcing it to be redone.
 
-import { createReadStream, writeFileSync, existsSync, openSync, readSync, closeSync } from "node:fs";
+import { writeFileSync, existsSync } from "node:fs";
+import { graphStream, isGraphPath, readPageUrl } from "./lib/graph-source.mjs";
 import { join } from "node:path";
 
 const argv = process.argv.slice(2);
 const flag = (n, d) => { const i = argv.indexOf(n); return i !== -1 ? argv[i + 1] : d; };
-const graphmlPath = argv.find(a => !a.startsWith("--") && a.endsWith(".graphml"));
+const graphmlPath = argv.find(a => !a.startsWith("--") && isGraphPath(a));
 const OUT = flag("--out", null);
 if (!graphmlPath || !OUT || !existsSync(OUT)) {
   process.stderr.write("usage: node analysis/resolve-script-origins.mjs <graphml> --out <flowdir>\n");
@@ -32,7 +33,7 @@ const un = s => s == null ? null : s
   .replace(/&#39;/g, "'").replace(/&apos;/g, "'").replace(/&amp;/g, "&");
 
 async function* stream(path, want) {
-  const st = createReadStream(path, { encoding: "utf8" });
+  const st = graphStream(path);
   let buf = "";
   const open = new RegExp(`<(${want.join("|")})\\b`, "g");
   for await (const chunk of st) {
@@ -75,12 +76,7 @@ const idOf = h => (h.match(/id="(n\d+)"/) || [])[1];
 const ends = h => [(h.match(/source="(n\d+)"/) || [])[1], (h.match(/target="(n\d+)"/) || [])[1]];
 
 // the page URL lives in <desc><url> in the header, not on the DOM root node
-let pageUrl = (() => {
-  const fd = openSync(graphmlPath, "r");
-  try { const b = Buffer.alloc(262144); const n = readSync(fd, b, 0, b.length, 0);
-    const m = b.toString("utf8", 0, n).match(/<url>([^<]*)<\/url>/); return m ? m[1] : null;
-  } finally { closeSync(fd); }
-})();
+let pageUrl = await readPageUrl(graphmlPath);
 const scriptNodes = new Set(), resUrl = new Map(), directUrl = new Map();
 // Nodes that can appear in a script-loading chain: script nodes, <script> elements, and the
 // parser. Only these are retained, so the maps stay small on multi-GB graphs where `create node`

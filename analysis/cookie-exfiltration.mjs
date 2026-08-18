@@ -25,6 +25,7 @@ import {
   streamElements,
   makeAttrReader,
   readPageUrl,
+  graphExists,
   unwrap,
 } from "./lib/graphml-stream.mjs";
 
@@ -52,11 +53,15 @@ if (!graphmlPath || !bodiesPath) {
   );
   process.exit(2);
 }
-for (const p of [graphmlPath, bodiesPath]) {
-  if (!existsSync(p)) {
-    console.error(`no such file: ${p}`);
-    process.exit(2);
-  }
+// graphExists, not existsSync: an archived graph is on disk as <name>.graphml.zst, so a bare
+// existsSync on the .graphml path reports "no such file" for a graph that is perfectly readable.
+if (!graphExists(graphmlPath)) {
+  console.error(`no such file: ${graphmlPath}`);
+  process.exit(2);
+}
+if (!existsSync(bodiesPath)) {
+  console.error(`no such file: ${bodiesPath}`);
+  process.exit(2);
 }
 
 // ---------------------------------------------------------------------------
@@ -277,11 +282,15 @@ for await (const line of rl) {
 // Report
 // ---------------------------------------------------------------------------
 
+// Resolved once: on an archived graph each readPageUrl call re-opens and re-decompresses the
+// header, and this value is printed on both the JSON and the human path.
+const pageUrlValue = await readPageUrl(graphmlPath);
+
 if (asJson) {
   console.log(
     JSON.stringify(
       {
-        pageUrl: readPageUrl(graphmlPath),
+        pageUrl: pageUrlValue,
         stats,
         cookiesConsidered: [...cookieValues.keys()],
         findings: Object.fromEntries(findings),
@@ -297,7 +306,7 @@ if (asJson) {
 }
 if (!asJson) {
 
-console.log(`page: ${readPageUrl(graphmlPath) ?? "(unknown)"}`);
+console.log(`page: ${pageUrlValue ?? "(unknown)"}`);
 console.log(
   `bodies: ${stats.records} records, ${stats.withBody} with content, ` +
     `${stats.truncated} truncated, ${stats.dropped} dropped`,

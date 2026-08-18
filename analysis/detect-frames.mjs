@@ -20,10 +20,11 @@
 //
 // Usage: node analysis/detect-frames.mjs <graphml> [--out <file>]
 
-import { createReadStream, writeFileSync, openSync, readSync, closeSync } from "node:fs";
+import { writeFileSync } from "node:fs";
+import { graphStream, isGraphPath, readPageUrl } from "./lib/graph-source.mjs";
 import { roleOf } from "./lib/host-role.mjs";
 
-const graphmlPath = process.argv.find(a => !a.startsWith("--") && a.endsWith(".graphml"));
+const graphmlPath = process.argv.find(a => !a.startsWith("--") && isGraphPath(a));
 const flag = (n, d) => { const i = process.argv.indexOf(n); return i !== -1 ? process.argv[i + 1] : d; };
 const outPath = flag("--out", null);
 if (!graphmlPath) { process.stderr.write("usage: detect-frames.mjs <graphml> [--out <file>]\n"); process.exit(1); }
@@ -32,7 +33,7 @@ const un = s => s == null ? null : s.replace(/&lt;/g, "<").replace(/&gt;/g, ">")
   .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&apos;/g, "'").replace(/&amp;/g, "&");
 
 async function* stream(path, want) {
-  const st = createReadStream(path, { encoding: "utf8" });
+  const st = graphStream(path);
   let buf = "";
   const open = new RegExp(`<(${want.join("|")})\\b`, "g");
   for await (const ch of st) {
@@ -60,12 +61,7 @@ const eA = A("edge"), nA = A("node");
 const idOf = h => (h.match(/id="(n\d+)"/) || [])[1];
 const ends = h => [(h.match(/source="(n\d+)"/) || [])[1], (h.match(/target="(n\d+)"/) || [])[1]];
 
-const pageUrl = (() => {
-  const fd = openSync(graphmlPath, "r");
-  try { const b = Buffer.alloc(262144); const n = readSync(fd, b, 0, b.length, 0);
-    return (b.toString("utf8", 0, n).match(/<url>([^<]*)<\/url>/) || [])[1] || null;
-  } finally { closeSync(fd); }
-})();
+const pageUrl = await readPageUrl(graphmlPath);
 const MULTI = new Set(["co.uk","com.au","co.jp","co.nz","com.br","co.in","org.uk","gov.uk"]);
 const registrable = h => { if (!h) return null; const p = String(h).toLowerCase().split(".");
   if (p.length <= 2) return p.join("."); const l2 = p.slice(-2).join("."); return MULTI.has(l2) ? p.slice(-3).join(".") : l2; };

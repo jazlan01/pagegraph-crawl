@@ -17,6 +17,7 @@
 // with no readable declaration is a normal corpus case, not an error.
 
 import { readdirSync, writeFileSync, existsSync } from "node:fs";
+import { graphBase, isGraphPath } from "./lib/graph-source.mjs";
 import { join } from "node:path";
 
 import { findRulesetUrl, parseDeclaration } from "./lib/cmp-declaration.mjs";
@@ -38,10 +39,10 @@ const fetchJson = async (url) => {
 
 for (const dir of dirs) {
   const site = dir.replace(/\/$/, "").split("/").pop();
-  const graph = existsSync(dir) && readdirSync(dir).find((f) => f.endsWith(".graphml"));
+  const graph = existsSync(dir) && readdirSync(dir).find((f) => isGraphPath(f));
   const bodies = existsSync(dir) && readdirSync(dir).find((f) => f.endsWith(".bodies.ndjson"));
   if (!graph) { process.stderr.write(`${site}: no graphml, skipping\n`); continue; }
-  const base = join(dir, graph.replace(/(\.pruned)?\.graphml$/, ""));
+  const base = join(dir, graphBase(graph));
   const outPath = base + suffix;
 
   let record = { site, cmp: null, note: "no CMP ruleset found in this crawl", cookies: {} };

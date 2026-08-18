@@ -17,23 +17,9 @@
 // NOTE for analysis: never infer what a cookie DOES from its name — names are
 // misleading. Use the read sites + consumers this reports as the evidence.
 
-import { createReadStream, openSync, readSync, closeSync } from "node:fs";
+import { graphStream, readPageUrl } from "./lib/graph-source.mjs";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-
-// The page url lives in <desc><url> near the top; read just the file head to get
-// it (the whole graph can be multi-GB).
-const readPageUrl = (path) => {
-  const fd = openSync(path, "r");
-  try {
-    const b = Buffer.alloc(262144);
-    const n = readSync(fd, b, 0, b.length, 0);
-    const m = b.toString("utf8", 0, n).match(/<url>([^<]*)<\/url>/);
-    return m ? m[1] : null;
-  } finally {
-    closeSync(fd);
-  }
-};
 
 const argv = process.argv.slice(2);
 const splitIdx = argv.indexOf("--split");
@@ -92,7 +78,7 @@ const destUrlFromArgs = (argsRaw) => {
 // are XML-escaped, so a literal `</node>` never appears inside one; scanning for
 // the close tag is safe. Keeps a carry buffer across chunk boundaries.
 async function* streamElements(path) {
-  const stream = createReadStream(path, { encoding: "utf8" });
+  const stream = graphStream(path);
   let buf = "";
   const openRe = /<(node|edge|key)\b/g;
   for await (const chunk of stream) {
@@ -187,7 +173,7 @@ const parseJar = (s) => {
 // PASS 1 — nodes + non-jscall edges: cookie values, readers, .get sites, and
 // the maps needed to resolve a script node to its source URL.
 // ============================================================================
-let pageUrl = readPageUrl(graphmlPath);
+let pageUrl = await readPageUrl(graphmlPath);
 let cookieJarId = null;
 const scriptIds = new Set(); // script node ids
 const webApiMethod = new Map(); // web API / JS builtin node id -> method

@@ -12,7 +12,8 @@
 //   (no key/prefix/vendor = every key in the chosen channel[s])
 //
 // Streaming parser (handles multi-GB single-line graphs); never buffers the whole file.
-import { createReadStream } from "node:fs";
+
+import { graphStream } from "./lib/graph-source.mjs";
 import { writeFileSync } from "node:fs";
 
 const args = process.argv.slice(2);
@@ -72,7 +73,7 @@ const escXml = (s) => (s == null ? "" : String(s)
   .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;"));
 
 async function* streamElements(path) {
-  const stream = createReadStream(path, { encoding: "utf8" });
+  const stream = graphStream(path);
   let buf = "";
   const openRe = /<(node|edge|key)\b/g;
   for await (const chunk of stream) {

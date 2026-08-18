@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Streaming variant of edge-stacks.mjs for multi-GB graphs.
 //   node analysis/edge-stacks-stream.mjs <graphml> [--key STR] [--type STR] [--all] [--frames N] [--json]
-import { createReadStream } from "node:fs";
+
+import { graphStream } from "./lib/graph-source.mjs";
 
 const args = process.argv.slice(2);
 const graphmlPath = args.find((a) => !a.startsWith("--"));
@@ -39,7 +40,7 @@ const unescapeXml = (s) =>
         .replace(/&amp;/g, "&");
 
 async function* streamElements(path) {
-  const stream = createReadStream(path, { encoding: "utf8" });
+  const stream = graphStream(path);
   let buf = "";
   const openRe = /<(node|edge|key)\b/g;
   for await (const chunk of stream) {

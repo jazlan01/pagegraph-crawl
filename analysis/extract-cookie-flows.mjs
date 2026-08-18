@@ -40,12 +40,13 @@
 // Output: <dir>/_scripts.json, <dir>/_src/<node>.js (full source, once each),
 //         <dir>/_summary.json, <dir>/flows/<cookie>.json (every edge touching it).
 
-import { createReadStream, openSync, readSync, closeSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { graphStream, isGraphPath, readPageUrl } from "./lib/graph-source.mjs";
 import { join } from "node:path";
 
 const argv = process.argv.slice(2);
 const flag = (n, d) => { const i = argv.indexOf(n); return i !== -1 ? argv[i + 1] : d; };
-const graphmlPath = argv.find(a => !a.startsWith("--") && a.endsWith(".graphml"));
+const graphmlPath = argv.find(a => !a.startsWith("--") && isGraphPath(a));
 const OUT = flag("--out", null);
 const MIN_BITS = parseInt(flag("--min-bits", "30"), 10);
 if (!graphmlPath || !OUT) {
@@ -57,18 +58,8 @@ const un = s => s == null ? null : s
   .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"')
   .replace(/&#39;/g, "'").replace(/&apos;/g, "'").replace(/&amp;/g, "&");
 
-const readPageUrl = p => {
-  const fd = openSync(p, "r");
-  try {
-    const b = Buffer.alloc(262144);
-    const n = readSync(fd, b, 0, b.length, 0);
-    const m = b.toString("utf8", 0, n).match(/<url>([^<]*)<\/url>/);
-    return m ? m[1] : null;
-  } finally { closeSync(fd); }
-};
-
 async function* stream(path, want) {
-  const st = createReadStream(path, { encoding: "utf8" });
+  const st = graphStream(path);
   let buf = "";
   const open = new RegExp(`<(${want.join("|")})\\b`, "g");
   for await (const chunk of st) {
@@ -137,7 +128,7 @@ const isHostish = v => /^https?:\/\//i.test(v) || /^\.?[a-z0-9][a-z0-9.-]*\.[a-z
 
 // ===================== PASS 1: nodes + cookie values =====================
 const t0 = Date.now();
-const pageUrl = readPageUrl(graphmlPath);
+const pageUrl = await readPageUrl(graphmlPath);
 let jar = null;
 const bucketOf = new Map();  // storage node id -> "cookie" | "localStorage" | "sessionStorage"
 const nodes = new Map();     // id -> attrs (source stripped out, kept separately)
@@ -159,7 +150,6 @@ for await (const el of stream(graphmlPath, ["key", "node"])) {
   nodes.set(id, a);
 }
 process.stderr.write(`${nodes.size} nodes, ${srcOf.size} with source, buckets: ${[...bucketOf.values()].join("/") || "none"}\n`);
-
 
 // ---- what was this jar read actually looking for? -------------------------------
 // `document.cookie` hands back everything, so the edge cannot name a cookie. The code

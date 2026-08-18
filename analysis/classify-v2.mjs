@@ -26,7 +26,8 @@
 // may key on. Pass A is the inference baseline, labelled as such, so a name-derived claim can never
 // be mistaken for an observed one.
 
-import { mkdirSync, writeFileSync, readdirSync, existsSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { graphBase, graphExists, isGraphPath } from "./lib/graph-source.mjs";
 import { join } from "node:path";
 
 import { buildEvidence } from "./lib/cookie-evidence.mjs";
@@ -37,8 +38,8 @@ import { validateVerdict } from "./lib/verdict-schema.mjs";
 
 const argv = process.argv.slice(2);
 const flag = (n, d) => { const i = argv.indexOf(n); return i !== -1 ? argv[i + 1] : d; };
-const graphmlPath = argv.find((a) => !a.startsWith("--") && a.endsWith(".graphml"));
-if (!graphmlPath || !existsSync(graphmlPath)) {
+const graphmlPath = argv.find((a) => !a.startsWith("--") && isGraphPath(a));
+if (!graphmlPath || !graphExists(graphmlPath)) {
   process.stderr.write("usage: node analysis/classify-v2.mjs <graphml> [--provider p] [--out dir]\n");
   process.exit(1);
 }
@@ -51,7 +52,7 @@ if (!headAvailable(provider)) {
     `rules-only fallback, because a two-pass run with no head is just the feature vector.\n`);
   process.exit(1);
 }
-const outDir = flag("--out", graphmlPath.replace(/(\.pruned)?\.graphml$/, "") + ".v2");
+const outDir = flag("--out", graphBase(graphmlPath) + ".v2");
 const onlyCookie = flag("--cookie", null);
 const concurrency = Math.max(1, parseInt(flag("--concurrency", "8"), 10));
 const log = (m) => process.stderr.write(m + "\n");

@@ -22,7 +22,8 @@
 // Values are matched raw, URL-encoded, and double-encoded, since scripts routinely
 // encodeURIComponent a value before appending it to a query string.
 
-import { createReadStream, openSync, readSync, closeSync, readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
+import { graphBase, graphStream, readPageUrl } from "./lib/graph-source.mjs";
 
 const argv = process.argv.slice(2);
 const flagVal = (n, d) => { const i = argv.indexOf(n); return i !== -1 ? argv[i + 1] : d; };
@@ -47,18 +48,8 @@ const unescapeXml = (s) => s == null ? null : s
   .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"')
   .replace(/&#39;/g, "'").replace(/&amp;/g, "&");
 
-const readPageUrl = (path) => {
-  const fd = openSync(path, "r");
-  try {
-    const b = Buffer.alloc(262144);
-    const n = readSync(fd, b, 0, b.length, 0);
-    const m = b.toString("utf8", 0, n).match(/<url>([^<]*)<\/url>/);
-    return m ? m[1] : null;
-  } finally { closeSync(fd); }
-};
-
 async function* streamElements(path) {
-  const stream = createReadStream(path, { encoding: "utf8" });
+  const stream = graphStream(path);
   let buf = "";
   const openRe = /<(node|edge|key)\b/g;
   for await (const chunk of stream) {
@@ -139,8 +130,8 @@ const parseJar = (s) => {
 // the graph's JS-visible jar reads never expose); the graph's own jar edges add
 // values that existed only transiently during the crawl.
 // ---------------------------------------------------------------------------
-const pageUrl = readPageUrl(graphmlPath);
-const base = graphmlPath.replace(/(\.pruned)?\.graphml$/, "");
+const pageUrl = await readPageUrl(graphmlPath);
+const base = graphBase(graphmlPath);
 const cookieValues = new Map(); // name -> Set(value)
 const addVal = (name, v) => {
   if (!name || !v || v.length < MIN_LEN) return;

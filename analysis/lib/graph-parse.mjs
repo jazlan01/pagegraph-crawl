@@ -5,26 +5,22 @@
 // carry-buffer streamer, the graphml key table, byte-offset → source windows, and stack decoding.
 // Never readFileSync a multi-GB graphml — everything here streams.
 
-import { createReadStream, openSync, readSync, closeSync } from "node:fs";
+// Opening the graph lives in graph-source.mjs: a graph may be stored plain or archived as .zst,
+// and every reader here works the same either way. `readPageUrl` is ASYNC now — a zstd frame
+// cannot be pread from an arbitrary byte range, so the header has to be streamed. Callers are ESM
+// and use top-level await.
+import { graphStream, readPageUrl, graphBase, isGraphPath, resolveGraphPath, graphExists } from "./graph-source.mjs";
+
+export { readPageUrl, graphBase, isGraphPath, resolveGraphPath, graphStream, graphExists };
 
 export const un = (s) => s == null ? null : s
   .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"')
   .replace(/&#39;/g, "'").replace(/&apos;/g, "'").replace(/&amp;/g, "&");
 
-export const readPageUrl = (p) => {
-  const fd = openSync(p, "r");
-  try {
-    const b = Buffer.alloc(262144);
-    const n = readSync(fd, b, 0, b.length, 0);
-    const m = b.toString("utf8", 0, n).match(/<url>([^<]*)<\/url>/);
-    return m ? m[1] : null;
-  } finally { closeSync(fd); }
-};
-
 // Yield each <node>/<edge>/<key> element as {tag, head, body}. Bounds the carry buffer so millions of
 // uninteresting elements streaming past cannot grow it past V8's max string length.
 export async function* stream(path) {
-  const st = createReadStream(path, { encoding: "utf8" });
+  const st = graphStream(path);
   let buf = "";
   const open = /<(node|edge|key)\b/g;
   for await (const chunk of st) {

@@ -18,7 +18,8 @@
 // fixed round cap (default 4) captures realistic transform chains
 // (cookie -> encode -> hash -> fetch) without unbounded work.
 
-import { createReadStream, openSync, readSync, closeSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { graphStream, readPageUrl } from "./lib/graph-source.mjs";
 import { join } from "node:path";
 
 const argv = process.argv.slice(2);
@@ -45,16 +46,6 @@ const unescapeXml = (s) => s == null ? null : s
   .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"')
   .replace(/&#39;/g, "'").replace(/&amp;/g, "&");
 
-const readPageUrl = (path) => {
-  const fd = openSync(path, "r");
-  try {
-    const b = Buffer.alloc(262144);
-    const n = readSync(fd, b, 0, b.length, 0);
-    const m = b.toString("utf8", 0, n).match(/<url>([^<]*)<\/url>/);
-    return m ? m[1] : null;
-  } finally { closeSync(fd); }
-};
-
 const isNetworkSink = (method) =>
   /(?:^|\.)fetch\b|XMLHttpRequest\.(?:open|send|setRequestHeader)\b|sendBeacon\b|(?:^|\.)WebSocket\b|EventSource\b|HTML(?:Image|Script|Link|Media|IFrame)Element\.src\b|Navigator\.sendBeacon\b/i.test(method || "");
 
@@ -69,7 +60,7 @@ const destUrlFromArgs = (argsRaw) => {
 };
 
 async function* streamElements(path) {
-  const stream = createReadStream(path, { encoding: "utf8" });
+  const stream = graphStream(path);
   let buf = "";
   const openRe = /<(node|edge|key)\b/g;
   for await (const chunk of stream) {
@@ -140,7 +131,7 @@ const parseJar = (s) => {
 // ---------------------------------------------------------------------------
 // PASS 1 — node maps, cookie seed values, script-url resolution, request edges.
 // ---------------------------------------------------------------------------
-const pageUrl = readPageUrl(graphmlPath);
+const pageUrl = await readPageUrl(graphmlPath);
 let cookieJarId = null;
 const webApiMethod = new Map();   // call node id -> method
 const resourceUrl = new Map();    // resource node id -> url

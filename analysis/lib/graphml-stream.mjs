@@ -8,7 +8,12 @@
 // Never readFileSync a graphml: real captures reach multiple GB, well past
 // V8's max string length. Everything here streams.
 
-import { createReadStream, openSync, readSync, closeSync } from "node:fs";
+// Opening the graph lives in graph-source.mjs: a graph may be stored plain or archived as .zst,
+// and everything here reads it the same either way. `readPageUrl` is ASYNC now — a zstd frame
+// cannot be pread from an arbitrary byte range, so the header has to be streamed.
+import { graphStream, readPageUrl, graphBase, isGraphPath, resolveGraphPath, graphExists } from "./graph-source.mjs";
+
+export { readPageUrl, graphBase, isGraphPath, resolveGraphPath, graphStream, graphExists };
 
 export const unescapeXml = (s) =>
   s == null
@@ -19,19 +24,6 @@ export const unescapeXml = (s) =>
         .replace(/&quot;/g, '"')
         .replace(/&#39;/g, "'")
         .replace(/&amp;/g, "&");
-
-// The crawled page's URL, read from the head of the file without loading it all.
-export const readPageUrl = (path) => {
-  const fd = openSync(path, "r");
-  try {
-    const b = Buffer.alloc(262144);
-    const n = readSync(fd, b, 0, b.length, 0);
-    const m = b.toString("utf8", 0, n).match(/<url>([^<]*)<\/url>/);
-    return m ? m[1] : null;
-  } finally {
-    closeSync(fd);
-  }
-};
 
 // Yields every <node>, <edge> and <key> element as {tag, head, body}, holding
 // only a partial element in memory at a time.
@@ -52,7 +44,7 @@ export async function* streamElements(path) {
  * and it appears once at the head of the file.
  */
 export async function* streamElementsFiltered(path, tags) {
-  const stream = createReadStream(path, { encoding: "utf8" });
+  const stream = graphStream(path);
   let buf = "";
   const openRe = new RegExp(`<(${tags.join("|")})\\b`, "g");
   for await (const chunk of stream) {

@@ -18,13 +18,13 @@
 // (base64 assembly of a URL, an allow/deny path list) that distinguishes a genuine
 // proxy from a benign wrapper such as a logger or a polyfill.
 
-import { createReadStream, openSync, readSync, closeSync } from "node:fs";
+import { graphStream, isGraphPath, readPageUrl } from "./lib/graph-source.mjs";
 
 const argv = process.argv.slice(2);
 const flag = (n, d) => { const i = argv.indexOf(n); return i !== -1 ? argv[i + 1] : d; };
 const asJson = argv.includes("--json");
 const CTX = parseInt(flag("--ctx", "260"), 10);
-const graphmlPath = argv.find(a => !a.startsWith("--") && a.endsWith(".graphml"));
+const graphmlPath = argv.find(a => !a.startsWith("--") && isGraphPath(a));
 if (!graphmlPath) {
   process.stderr.write("usage: node analysis/detect-cloaking.mjs <graphml> [--json] [--ctx N]\n");
   process.exit(1);
@@ -33,16 +33,6 @@ if (!graphmlPath) {
 const un = s => s == null ? null : s
   .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"')
   .replace(/&#39;/g, "'").replace(/&apos;/g, "'").replace(/&amp;/g, "&");
-
-const readPageUrl = p => {
-  const fd = openSync(p, "r");
-  try {
-    const b = Buffer.alloc(262144);
-    const n = readSync(fd, b, 0, b.length, 0);
-    const m = b.toString("utf8", 0, n).match(/<url>([^<]*)<\/url>/);
-    return m ? m[1] : null;
-  } finally { closeSync(fd); }
-};
 
 // The interception surface. Each entry is a request-initiating API that, if
 // reassigned or redefined, lets a script rewrite where data goes.
@@ -65,7 +55,7 @@ const REWRITE = [
 ];
 
 async function* stream(path) {
-  const st = createReadStream(path, { encoding: "utf8" });
+  const st = graphStream(path);
   let buf = "";
   const open = /<(node|key)\b/g;
   for await (const chunk of st) {
@@ -111,7 +101,7 @@ const nA = (body, name) => {
   return m ? un(m[1]) : null;
 };
 
-const pageUrl = readPageUrl(graphmlPath);
+const pageUrl = await readPageUrl(graphmlPath);
 const findings = [];
 let scanned = 0, withSource = 0;
 

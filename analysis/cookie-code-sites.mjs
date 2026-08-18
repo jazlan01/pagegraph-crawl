@@ -37,7 +37,7 @@ const fragsOf = (value) => {
 const NET = /(?:^|\.)fetch\b|XMLHttpRequest\.(?:open|send|setRequestHeader)\b|sendBeacon\b|(?:^|\.)WebSocket\b|EventSource\b|HTML(?:Image|Script|Link|Media|IFrame)Element\.src\b/i;
 const destFromArgs = (args) => { if (!args) return null; try { const a = JSON.parse(args); for (const x of Array.isArray(a) ? a : []) if (typeof x === "string" && /^(https?:)?\/\/|^\//.test(x)) return x; } catch { /* not json */ } return null; };
 
-const pageUrl = readPageUrl(graphmlPath);
+const pageUrl = await readPageUrl(graphmlPath);
 
 // ---- pass 1: node maps, storage edges, value fragments, distinct read sites -
 log(`  pass 1: ${graphmlPath}`);

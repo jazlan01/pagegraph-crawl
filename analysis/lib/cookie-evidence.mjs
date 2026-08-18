@@ -12,6 +12,7 @@
 //                                  (readFileSync-based → size-gated; optional)
 
 import { execFileSync } from "node:child_process";
+import { graphBase } from "./graph-source.mjs";
 import { readFileSync, existsSync, mkdtempSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
@@ -44,8 +45,7 @@ const readJsonFile = (path) => {
   }
 };
 
-export const deriveBase = (graphmlPath) =>
-  graphmlPath.replace(/(\.pruned)?\.graphml$/, "");
+export const deriveBase = (graphmlPath) => graphBase(graphmlPath);
 
 // ---------------------------------------------------------------------------
 // Build all CookieEvidence records for a crawl.

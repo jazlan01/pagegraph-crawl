@@ -22,6 +22,7 @@
 // Env: ANTHROPIC_API_KEY enables the LLM head; without it the tool runs rules-only.
 
 import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
+import { isGraphPath } from "./lib/graph-source.mjs";
 import { join } from "node:path";
 import { buildEvidence, deriveBase } from "./lib/cookie-evidence.mjs";
 import { extractFeatures } from "./lib/cookie-features.mjs";
@@ -39,7 +40,7 @@ import { validateVerdict } from "./lib/verdict-schema.mjs";
 const argv = process.argv.slice(2);
 const flag = (n, d) => { const i = argv.indexOf(n); return i !== -1 ? argv[i + 1] : d; };
 const has = (n) => argv.includes(n);
-const graphmlPath = argv.find((a) => !a.startsWith("--") && (a.endsWith(".graphml")));
+const graphmlPath = argv.find((a) => !a.startsWith("--") && (isGraphPath(a)));
 if (!graphmlPath) {
   process.stderr.write("usage: node analysis/classify-cookies.mjs <graphml> [--rules-only] [--cookie <name>] [--out <dir>] [--declared <file>] [--concurrency <n>] [--model <id>] [--stdout]\n");
   process.exit(1);

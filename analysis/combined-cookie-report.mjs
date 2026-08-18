@@ -14,6 +14,7 @@
 // The VERDICT is strictly declared-vs-observed (the MCP does not feed it).
 
 import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { isGraphPath } from "./lib/graph-source.mjs";
 import { join } from "node:path";
 
 import { buildComparisonRow, TRACKING, STATUS_META, STATUS_ORDER } from "./lib/declared-observed.mjs";
@@ -36,7 +37,7 @@ const mcpIcc = (name) => {
 };
 
 const sites = (only.length ? only : readdirSync(crawlRoot))
-  .filter((s) => { try { return readdirSync(join(crawlRoot, s)).some((f) => f.endsWith(".graphml")); } catch { return false; } })
+  .filter((s) => { try { return readdirSync(join(crawlRoot, s)).some((f) => isGraphPath(f)); } catch { return false; } })
   .sort();
 
 const perSite = [];

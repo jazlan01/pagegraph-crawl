@@ -17,7 +17,7 @@
 // cookie jar, each resolved to the writing script's source URL, plus the
 // `cookie source` channel (js | cookie-store | set-cookie-header).
 
-import { createReadStream, openSync, readSync, closeSync } from "node:fs";
+import { graphStream, readPageUrl } from "./lib/graph-source.mjs";
 
 const argv = process.argv.slice(2);
 const asJson = argv.includes("--json");
@@ -33,18 +33,8 @@ const unescapeXml = (s) => s == null ? null : s
   .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"')
   .replace(/&#39;/g, "'").replace(/&amp;/g, "&");
 
-const readPageUrl = (path) => {
-  const fd = openSync(path, "r");
-  try {
-    const b = Buffer.alloc(262144);
-    const n = readSync(fd, b, 0, b.length, 0);
-    const m = b.toString("utf8", 0, n).match(/<url>([^<]*)<\/url>/);
-    return m ? m[1] : null;
-  } finally { closeSync(fd); }
-};
-
 async function* streamElements(path) {
-  const stream = createReadStream(path, { encoding: "utf8" });
+  const stream = graphStream(path);
   let buf = "";
   const openRe = /<(node|edge|key)\b/g;
   for await (const chunk of stream) {
@@ -99,7 +89,7 @@ const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 // interleaved with the storage edges, so storage edges are buffered and resolved
 // after the stream completes.
 // ---------------------------------------------------------------------------
-const pageUrl = readPageUrl(graphmlPath);
+const pageUrl = await readPageUrl(graphmlPath);
 let cookieJarId = null;
 const resourceUrl = new Map();   // resource node -> url
 const executeSrc = new Map();    // script node -> element node

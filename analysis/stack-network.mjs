@@ -11,7 +11,8 @@
 //
 // Usage: node analysis/stack-network.mjs <crawl-dir> [--out out.json]
 
-import { createReadStream, readFileSync, readdirSync, writeFileSync, existsSync } from "node:fs";
+import { createReadStream, readdirSync, writeFileSync } from "node:fs";
+import { graphStream, isGraphPath } from "./lib/graph-source.mjs";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 
@@ -21,7 +22,7 @@ const outAt = process.argv.indexOf("--out");
 const outFile = outAt > 0 ? process.argv[outAt + 1] : null;
 
 const files = readdirSync(dir);
-const graph = files.find(f => f.endsWith(".graphml"));
+const graph = files.find(f => isGraphPath(f));
 const bodies = files.find(f => f.endsWith(".bodies.ndjson"));
 if (!graph) { console.error("no .graphml in " + dir); process.exit(1); }
 
@@ -30,7 +31,7 @@ const un = s => s == null ? null : s.replace(/&lt;/g, "<").replace(/&gt;/g, ">")
 
 // ---- streaming element reader (bounded carry buffer) ----------------------
 async function* stream(path, want) {
-  const st = createReadStream(path, { encoding: "utf8" });
+  const st = graphStream(path);
   let buf = "";
   const open = new RegExp(`<(${want.join("|")})\\b`, "g");
   for await (const ch of st) {
