@@ -39,7 +39,7 @@ Launch the **`cookie-lifecycle-analyst`** agent (Agent tool, `subagent_type:
 > classify 1P/3P from the cookie-store dump → profile each cookie's lifecycle, reads/consumers
 > (`cookie-reads.mjs`), consumer→network data-flow (`cookie-flow.mjs`: did a JS consumer actually fire a
 > `fetch`/XHR/`sendBeacon` with the value, and to which 1P/3P host — report `firedNetworkRequest` +
-> `destUrl`), per-modification provenance (`cookie-sites.mjs` + `edge-stacks.mjs`), usage and
+> `destUrl`), per-modification provenance (`cookie-writes.mjs` + `edge-stacks-stream.mjs`), usage and
 > tracking (behavior from the graph, never from the cookie's name) → triage opaque hand-rolled-crypto
 > cookies. Pass 2 (only for flagged cookies) = a second `--debug-stacks --debug-breakpoint` crawl on
 > the instrumented build at the located write sites to recover pre-encryption plaintext, condensed with
@@ -83,4 +83,4 @@ Notes:
 - Both passes use the same PageGraph-enabled build; pass 2 just adds `--debug-stacks` + a breakpoint,
   so no second browser is required.
 - Pass 1 is richer when the binary includes the per-edge `stack trace` engine change, but degrades
-  gracefully to `cookie-sites.mjs` offset specs without it.
+  gracefully to `cookie-writes.mjs` offset specs without it.

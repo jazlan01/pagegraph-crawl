@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// Streaming variant of edge-stacks.mjs for multi-GB graphs.
+// JS call stacks recorded on graph edges. Streams, so it handles multi-GB graphs and archives.
+// Replaced edge-stacks.mjs (deleted Aug 2026), which readFileSync'd the whole graph.
 //   node analysis/edge-stacks-stream.mjs <graphml> [--key STR] [--type STR] [--all] [--frames N] [--json]
 
 import { graphStream } from "./lib/graph-source.mjs";

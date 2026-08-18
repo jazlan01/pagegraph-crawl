@@ -43,14 +43,12 @@ design choice: see `output/audit-2026-08-02/mcp-headtohead.md`.
 | tool | use | note |
 |---|---|---|
 | `cookie-reads.mjs` | read sites + the consumers of the read value | |
-| `cookie-writes.mjs` | write/delete provenance, ALL cookies, one streaming pass | **use this** |
-| `cookie-sites.mjs` | one cookie's write/delete/read sites | *superseded* by `cookie-writes.mjs`; `readFileSync`, so it cannot open multi-GB graphs. Still wired into the skills/agents — rewrite those before deleting |
+| `cookie-writes.mjs` | write/delete provenance, ALL cookies, one streaming pass | |
 | `cookie-flow.mjs` | taint propagation: did a consumer actually send the value, and where |
 | `cookie-headers.mjs` | cookie values inside request/response headers and URLs |
 | `cookie-exfiltration.mjs` | values located inside captured request bodies |
 | `cookie-code-trace.mjs` | the actual source lines that touch a cookie |
-| `edge-stacks-stream.mjs` | JS call stacks on graph edges | **use this** on large graphs |
-| `edge-stacks.mjs` | same, `readFileSync` | *superseded* for multi-GB graphs |
+| `edge-stacks-stream.mjs` | JS call stacks on graph edges | |
 | `stacks-query.mjs` | condense a `--debug-stacks` sidecar for an agent |
 
 ### Vendor / infrastructure attribution
@@ -139,19 +137,6 @@ large ones individually, to protect the context window. Encoded/transformed valu
 `_px3`) may not value-match a consumer — the read site + reader script is still the evidence; don't
 conclude "no flow".
 
-## `cookie-sites.mjs`
-
-```
-node analysis/cookie-sites.mjs <graphml> <cookieName>
-```
-
-Parses a `page_graph_*.graphml` and reports where a cookie is **set / deleted / read**, resolving
-each acting script to its source URL. Emits ready `--debug-breakpoint` specs (`<escapedUrl>#<offset>`)
-for the write sites — the byte offset is the `script position` PageGraph records on `storage set`
-edges. Inline-script sites are flagged (no offset spec; their offsets are document-relative).
-
-Output JSON: `{ cookie, pageUrl, writes[], deletes[], reads{sites, readersReturningCookie}, writeSpecs[] }`.
-
 ## `cookie-exfiltration.mjs`
 
 ```
@@ -238,17 +223,25 @@ every flow looked first-party (`crossSiteReach: 0`) and only vendor knowledge co
 node analysis/cookie-writes.mjs <graphml> [cookieName] [--json]
 ```
 
-Streaming, **all-cookies** write/delete provenance — the streaming twin of `cookie-sites.mjs` (same
-relationship as `edge-stacks.mjs` → `edge-stacks-stream.mjs`). Two reasons it exists:
+Streaming, **all-cookies** write/delete provenance. It replaced `cookie-sites.mjs` (deleted Aug 2026),
+which used `readFileSync` and so could not open a graph past V8's ~512 MB string cap — which was 7 of
+15 graphs in the corpus, i.e. every client capture. On those, JS write provenance was simply
+unavailable and every cookie reported `setChannel: "unknown"`.
 
-1. `cookie-sites.mjs` uses `readFileSync`, so it cannot touch multi-GB graphs. On those, JS write
-   provenance was simply unavailable and every cookie reported `setChannel: "unknown"`.
-2. It reports every cookie in **one** pass. `cookie-sites.mjs` takes a single cookie name, so a driver had
-   to invoke it once per cookie — N full parses of the same graph (66 for a directv-sized inventory).
+It also reports every cookie in **one** pass, where `cookie-sites.mjs` took a single cookie name and
+had to be re-invoked per cookie — N full parses of the same graph (66 for a directv-sized inventory).
 
 Per cookie: each `storage set` / `delete storage` edge resolved to the writing script's source URL, plus
-the `cookie source` channel (`js` / `cookie-store` / `set-cookie-header`). `classify-cookies.mjs` uses
-this at any graph size; `cookie-sites.mjs` is retained for its `--debug-breakpoint` specs.
+the `cookie source` channel (`js` / `cookie-store` / `set-cookie-header`), and `writeSpecs[]` —
+ready-to-paste `<escapedUrl>#<offset>` strings for `--debug-breakpoint`, built from the `script
+position` PageGraph records on the write edge.
+
+Two things it does that its predecessor got wrong: `set-cookie-header` writes resolve to the
+responding resource rather than being mislabelled as inline page writes, and a `storage set` must
+target the cookie jar, so a same-named `localStorage` write cannot leak in.
+
+**Reads are not here** — `cookie-reads.mjs` owns read sites and `readers[]`. Note it stores raw
+`script position` values, so a read-site breakpoint spec has to be assembled by hand.
 
 ## `stacks-query.mjs`
 
@@ -280,9 +273,9 @@ of the VaultJS classification MCP. Each label is `{ label, probability, reasonin
 
 Pipeline (see `lib/`):
 1. **Evidence fusion** (`lib/cookie-evidence.mjs`) — fuses `<base>.cookies.json` + `<base>.cookie-network.json`
-   with `cookie-reads.mjs`/`cookie-flow.mjs` (`--split`) and, for graphs ≤~350 MB, `cookie-sites.mjs`,
-   into one `CookieEvidence` record per cookie. Streaming scripts run as subprocesses, so it scales to
-   multi-GB graphs (the readFileSync-based `cookie-sites` enrichment is size-gated off).
+   with `cookie-reads.mjs`/`cookie-flow.mjs` (`--split`) and `cookie-writes.mjs`, into one
+   `CookieEvidence` record per cookie. Every one of those streams and runs as a subprocess, so it
+   scales to multi-GB graphs at any size — there is no longer a size gate.
 2. **Features** (`lib/cookie-features.mjs`) — behavior-only vector: party (eTLD+1), set channel,
    persistence/expiry, attribute flags, value entropy + identifier heuristic, JS reads, exfiltration
    destinations (HTTP `Cookie:` + JS sinks), cross-site reach.
@@ -361,7 +354,7 @@ divergence) and `_index.json` (run summary), plus a compact console table.
 ## Pipeline (what the subagent does)
 
 1. Baseline crawl → graphml.
-2. `cookie-sites.mjs` → write/read sites + breakpoint specs.
+2. `cookie-writes.mjs` → write sites + breakpoint specs (`cookie-reads.mjs` for read sites).
 3. Crawl with `--debug-stacks --debug-breakpoint <spec> --debug-max-value 16000 --debug-max-captures 12`
    → stacks.json.
 4. `stacks-query.mjs --grep <value fragment>` → find the value's frame.
@@ -417,8 +410,7 @@ accuracy; `customer_id 0` is a floor on the MCP) are in `output/audit-2026-08-02
 ## Archiving graphs
 
 Full write-up with measured numbers and the limitations: **[graph-compression.md](graph-compression.md)**.
-Short version: the corpus went **21.2 GiB → 42.1 MiB (516×)** losslessly, three tools still cannot
-read archives (`cookie-sites.mjs`, `edge-stacks.mjs`, `prune-graph.py`), and shell globs on
+Short version: the corpus went **21.2 GiB → 42.1 MiB (516×)** losslessly, and shell globs on
 `*.graphml` silently match nothing once a directory is reclaimed.
 
 ```bash

@@ -8,7 +8,7 @@
 //   <base>.cookie-network.json  — HTTP channel: per-cookie {setBy[], sentTo[]} (optional)
 //   cookie-reads.mjs  --split    — readers + value consumers (streaming; any size)
 //   cookie-flow.mjs   --split    — taint → network hits (streaming; any size)
-//   cookie-sites.mjs  <name>     — JS write/delete provenance + source channel
+//   cookie-writes.mjs <name>     — JS write/delete provenance + source channel
 //                                  (readFileSync-based → size-gated; optional)
 
 import { execFileSync } from "node:child_process";

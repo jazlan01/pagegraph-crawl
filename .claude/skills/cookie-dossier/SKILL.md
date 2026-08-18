@@ -25,7 +25,7 @@ Launch the **`cookie-analyst`** agent (via the Agent tool, `subagent_type: "cook
 task prompt that includes the three parsed values, for example:
 
 > Analyze the cookie **`<cookieName>`** on **`<url>`** using the PageGraph binary at
-> **`<braveBinary>`**. Follow your full procedure: baseline crawl → `cookie-sites.mjs` to locate
+> **`<braveBinary>`**. Follow your full procedure: baseline crawl → `cookie-writes.mjs` to locate
 > write/read sites → `--debug-stacks` capture passes at those offsets (condense with
 > `stacks-query.mjs`) → iterate up the call stack (≤4 passes) to classify the value's origin and
 > transforms → write `<cookieName>.dossier.json` and `<cookieName>.md` into the run dir. Obey the

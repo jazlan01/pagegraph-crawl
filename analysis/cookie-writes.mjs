@@ -3,15 +3,17 @@
 //
 //   node analysis/cookie-writes.mjs <graphml> [cookieName] [--json]
 //
-// The streaming twin of `cookie-sites.mjs` (same relationship as
-// `edge-stacks.mjs` -> `edge-stacks-stream.mjs`). Two reasons it exists:
+// Replaced `cookie-sites.mjs` (deleted Aug 2026), for two reasons:
 //
-//  1. `cookie-sites.mjs` uses `readFileSync`, so it cannot touch multi-GB graphs —
-//     on those, JS write provenance was simply unavailable and every cookie's
-//     `setChannel` came back "unknown".
-//  2. It reports EVERY cookie in ONE pass. `cookie-sites.mjs` takes a single cookie
+//  1. That one used `readFileSync`, so it could not touch a graph past V8's ~512 MB
+//     string cap — 7 of 15 graphs in the corpus, i.e. every client capture. On those,
+//     JS write provenance was unavailable and every cookie's `setChannel` came back
+//     "unknown".
+//  2. It reports EVERY cookie in ONE pass. `cookie-sites.mjs` took a single cookie
 //     name, so a driver had to invoke it once per cookie — N full parses of the
 //     same graph. This does it once.
+//
+// NOT covered here: read sites. Those live in `cookie-reads.mjs`.
 //
 // Emits, per cookie: the `storage set` / `delete storage` edges targeting the
 // cookie jar, each resolved to the writing script's source URL, plus the

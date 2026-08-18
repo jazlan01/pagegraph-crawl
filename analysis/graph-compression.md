@@ -90,21 +90,16 @@ archives declare — not the graph being buffered.
 
 ## Limitations
 
-### Three tools cannot read archives at all
+### `prune-graph.py` cannot read archives
 
-Verified by running them against an archived graph:
+It opens the input path directly, so it fails on a `.zst` — and since no plaintext `.graphml`
+remains anywhere in the repo, it currently cannot run on anything at all.
 
-| tool | failure | why |
-|---|---|---|
-| `cookie-sites.mjs` | `ENOENT` | `readFileSync` on the graph path |
-| `edge-stacks.mjs` | `ENOENT` | `readFileSync` on the graph path |
-| `prune-graph.py` | traceback | opens the path directly; plaintext only |
-
-The first two are **still referenced by the agent instructions** (`.claude/agents/cookie-analyst.md`,
-`cookie-lifecycle-analyst.md`), so those agents will fail on an archived crawl. Both were already
-documented as superseded — `cookie-writes.mjs` and `edge-stacks-stream.mjs` are the streaming
-replacements and both read archives fine — but the agent docs were never updated. That is the
-sharpest edge in this change.
+`cookie-sites.mjs` and `edge-stacks.mjs` had the same problem for a different reason — both used
+`readFileSync`, so they were already failing on 7 of the 15 graphs (every client capture) before
+archiving existed, because V8 caps a string near 512 MB. Both were **deleted in Aug 2026** and their
+references repointed at the streaming replacements that already covered them: `cookie-writes.mjs`
+(writes, deletes, `writeSpecs`) plus `cookie-reads.mjs` (read sites), and `edge-stacks-stream.mjs`.
 
 ### Shell globs silently match nothing
 

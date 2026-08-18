@@ -23,12 +23,14 @@ identifier, not evidence of purpose.
   Debug flags (from the harness):
   - `--debug-stacks` — attach the debugger and capture stacks (required for captures)
   - `--debug-breakpoint '<SPEC>'` — repeatable. `SPEC` = `<urlRegex>#<byteOffset>` or
-    `<urlRegex>@<line>:<col>`. Offsets come from `cookie-sites.mjs`; `@line:col` comes from a prior
+    `<urlRegex>@<line>:<col>`. Offsets come from `cookie-writes.mjs`; `@line:col` comes from a prior
     capture's frame location (this is how you walk up the stack).
   - `--debug-max-value <N>` (use 16000 to capture full payload objects)
   - `--debug-max-captures <N>` (use ≤12)
-- **Find a cookie's sites**: `node analysis/cookie-sites.mjs <graphml> <cookieName>` →
-  JSON `{ writes[], deletes[], reads{}, writeSpecs[] }`. Each write/delete has a ready `spec`.
+- **Find a cookie's write sites**: `node analysis/cookie-writes.mjs <graphml> <cookieName>` →
+  JSON `{ cookie, writes[], deletes[], writeSpecs[] }`. Each write/delete has a ready `spec`.
+  (Reads are a separate tool — see the next bullet. Omit the cookie name for all cookies in one
+  pass, which is the only mode that also reports `pageUrl`; `--json` is ignored when a name is given.)
 - **Reads + consumers (behavior evidence)**: `node analysis/cookie-reads.mjs <graphml> <cookieName>` →
   the cookie's read (`.get`) sites + reader scripts and every consumer of the read value (network
   sinks flagged `isNetworkSink` with `destUrl`, plus plain consumer functions). This is your evidence
@@ -51,7 +53,7 @@ identifier, not evidence of purpose.
 
 ## Two failure modes to handle (learned in practice)
 
-- **Breakpoint slid past a one-shot write → 0 captures.** A `#offset` from `cookie-sites` sits at the
+- **Breakpoint slid past a one-shot write → 0 captures.** A `#offset` from `cookie-writes` sits at the
   storage-set position, which for a *one-shot inline write* can resolve *after* the statement, so
   nothing is captured. If a write capture yields 0 records, re-break at the **statement** using
   `<urlRegex>@<line>:<col>` (read the script around that line). Values produced by a *reused* writer
@@ -59,7 +61,7 @@ identifier, not evidence of purpose.
 - **Renderer crash at the write site ("error code 5/6").** If a cookie is set deep inside heavy
   framework code (e.g. a React/Next app bundle), pausing there can crash the instrumented renderer
   (no graphml/stacks produced). Do **not** retry it repeatedly — fall back to a **graph-only** dossier
-  (who sets it, value, source, `readersReturningCookie` from `cookie-sites`). That is a complete,
+  (who sets it, value, source, and the reader scripts from `cookie-reads.mjs`). That is a complete,
   valid lifecycle for first-party flag-style cookies. Prefer graph-first; use live capture only where
   it adds value and the site is stable.
 
@@ -69,8 +71,8 @@ identifier, not evidence of purpose.
    `mkdir -p analysis/runs/<cookie>`; use it as `<outDir>`.
 2. **Baseline crawl** (no debug): `npm run crawl -- -b <binary> -u <url> -o analysis/runs/<cookie> -t 30`.
    Find the newest graphml: `ls -t analysis/runs/<cookie>/page_graph_*.graphml | head -1`.
-3. **Locate sites**: `node analysis/cookie-sites.mjs <graphml> <cookie>`. Note `writeSpecs` (where
-   it's set), `deletes`, and `reads.readersReturningCookie` (who uses it). If `writeSpecs` is empty
+3. **Locate sites**: `node analysis/cookie-writes.mjs <graphml> <cookie>`. Note `writeSpecs` (where
+   it's set) and `deletes`. For who uses it, run `cookie-reads.mjs` (step 6). If `writeSpecs` is empty
    (inline-only or cookie not set on this load), say so and stop with what the graph shows.
 4. **Pass 1 — capture writes**: crawl with `--debug-stacks`, one `--debug-breakpoint <spec>` per
    `writeSpecs` entry, `--debug-max-value 16000 --debug-max-captures 12`. Condense the new
@@ -86,8 +88,7 @@ identifier, not evidence of purpose.
      its `<url>@<line>:<col>` as a new `--debug-breakpoint`. Repeat within budget.
 6. **Reads / usage**: run `node analysis/cookie-reads.mjs <graphml> <cookie>` — its `readers` are the
    scripts that read the cookie and its `consumers` are the functions/sinks that received the value
-   (with `isNetworkSink`/`destUrl` for network exfil). Combine with `cookie-sites.mjs`
-   `reads.readersReturningCookie`. This is the primary "how is it used / where does it flow" evidence.
+   (with `isNetworkSink`/`destUrl` for network exfil). This is the primary "how is it used / where does it flow" evidence.
 7. **Updates**: order `writes` by `timestamp`; note repeated writes / value changes.
 
 ## Output (write both to the run dir)

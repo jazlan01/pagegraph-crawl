@@ -44,7 +44,7 @@ bulk of the audit (graph enumeration + provenance) does not. So split the work:
   Produces `page_graph_<url>_<ts>.graphml` and `page_graph_<url>_<ts>.cookies.json` (the full
   cookie-store inventory: name, value, domain, path, expires, httpOnly, secure, sameSite — incl.
   third-party and httpOnly cookies JS can't see).
-- **Per-cookie sites**: `node analysis/cookie-sites.mjs <graphml> <cookieName>` →
+- **Per-cookie write sites**: `node analysis/cookie-writes.mjs <graphml> <cookieName>` →
   `{ writes[], deletes[], reads{}, writeSpecs[] }`. Each write/delete carries a ready `spec`
   (`<urlRegex>#<byteOffset>`) for pass 2 — but prefer converting it to a `@<line>:<col>` spec (see
   pass-2 step 5) since `#offset` breakpoints miss synchronous run-once IIFEs.
@@ -73,11 +73,12 @@ bulk of the audit (graph enumeration + provenance) does not. So split the work:
   automatic HTTP `Cookie:` header (that channel is the `.cookie-network.json` sidecar, reported
   separately). Run once with `--split <dir>` alongside `cookie-reads.mjs`, then read the per-cookie
   `<cookie>.flow.json` files.
-- **Per-edge provenance stacks**: `node analysis/edge-stacks.mjs <graphml> [--key <cookie>] [--all] [--json]`.
+- **Per-edge provenance stacks**: `node analysis/edge-stacks-stream.mjs <graphml> [--key <cookie>] [--all] [--json]`.
+  (In `--json` it also emits edges with `stack: null`; filter those out.)
   Prints the JS stack (function chain + async parents) the engine recorded on each cookie edge, with
   each frame joined to its script node. Use this for the "how was it modified" provenance. (Present
   only if the graph was produced by the stack-trace-enabled engine; if the `stack trace` attribute is
-  absent, fall back to `cookie-sites.mjs` specs for provenance location.)
+  absent, fall back to `cookie-writes.mjs` specs for provenance location.)
 - **Pass-2 capture (instrumented, with debugger)**:
   `npm run crawl -- -b <binary> -u <url> -o <outDir> -t 30 --debug-stacks --debug-breakpoint '<spec>' --debug-max-value 16000 --debug-max-captures 12`
   Writes a `.graphml` **and** a `.stacks.json` sidecar. Pausing the instrumented renderer at a heavy
@@ -135,10 +136,11 @@ bulk of the audit (graph enumeration + provenance) does not. So split the work:
      Report this per cookie in the dossier as a **consumer-fired-request** finding, and distinguish it
      from the automatic HTTP `Cookie:`-header transmission (the sidecar). This is what upgrades a vague
      "read by a 3P script" into a concrete "value `sendBeacon`'d to `<3P host>` with the id in the URL."
-   - **Lifecycle**: `node analysis/cookie-sites.mjs <graphml> <cookie>` → writes / deletes / reads,
+   - **Lifecycle**: `node analysis/cookie-writes.mjs <graphml> <cookie>` → writes / deletes
+     (reads come from `cookie-reads.mjs`),
      ordered by `timestamp`. Each write's channel is the `cookie source` (`js` / `cookie-store` /
      `set-cookie-header`).
-   - **How each modification was made** (provenance): `node analysis/edge-stacks.mjs <graphml> --key <cookie>`
+   - **How each modification was made** (provenance): `node analysis/edge-stacks-stream.mjs <graphml> --key <cookie>`
      for the JS call chain of each write; for `set-cookie-header` writes there is no JS stack — the
      provenance is the request/initiator that carried the `Set-Cookie` (join by `request id`).
    - **Tracking**: a read value that a consumer sends to a **third-party** destination is the tracking
@@ -158,7 +160,7 @@ bulk of the audit (graph enumeration + provenance) does not. So split the work:
      common cookie-setting shape) has already executed, so they capture **0 records**. `@line:col`
      specs arm eagerly via `setBreakpointByUrl` *before* the script parses and reliably catch such
      writes. Convert the pass-1 location to a `<urlRegex>@<line>:<col>` spec using the write frame's
-     line/column from `edge-stacks.mjs` (or the `cookie-sites.mjs` offset mapped to line:col). Only
+     line/column from `edge-stacks-stream.mjs` (or the `cookie-writes.mjs` offset mapped to line:col). Only
      fall back to the raw `#offset` `spec` if a line/column is not derivable.
    - Condense the resulting stacks with `stacks-query.mjs --grep <fragment of the ciphertext>` to find
      the frame/var holding the plaintext. Iterate up the stack with further `@<line>:<col>` breakpoints
@@ -170,8 +172,8 @@ bulk of the audit (graph enumeration + provenance) does not. So split the work:
      third-party/obfuscated bundle (e.g. a bot-vendor script) frequently returns a *different build or
      line-wrapping* than the renderer loaded, so its byte offsets and line:col will not map — a
      breakpoint derived that way lands on the wrong statement (or line N:0). Always derive break
-     locations from the **loaded** script: the frame line:col in the pass-1 `edge-stacks.mjs` / captured
-     stacks, or `cookie-sites.mjs` `writeSpecs`.
+     locations from the **loaded** script: the frame line:col in the pass-1 `edge-stacks-stream.mjs` / captured
+     stacks, or `cookie-writes.mjs` `writeSpecs`.
 6. **Correlate**: for pass-2 cookies, tie the captured plaintext → transform → ciphertext (the pass-1
    cookie value), building the value's journey.
 
