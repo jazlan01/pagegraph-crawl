@@ -201,6 +201,16 @@ per-cookie lifecycle/provenance audit:
   higher rounds), `cookie-sites.mjs` (JS write-site provenance), `edge-stacks.mjs`/`edge-stacks-stream.mjs`
   (cookie-edge stack traces; the `-stream` variant avoids `readFileSync`'s ~512 MB string cap on
   multi-GB graphs), `stacks-query.mjs`. **Never `readFileSync` a multi-GB graphml** — stream it.
+- **Graph archiving** — `analysis/archive-graph.sh` compresses a graph losslessly with
+  `zstd -19 --long=31` (180–1600×; the corpus went 21.2 GiB → 42 MiB) and `--reclaim` deletes the
+  original only after re-verifying its SHA-256. Do **not** run `prune-graph.py` first: truncating
+  stacks destroys 45% of every call frame to save 3.4% once compressed, because the redundancy is
+  what the codec is already exploiting — walmart's 110,905 stacks are only 14,013 distinct values.
+  `analysis/lib/graph-source.mjs` then makes archives transparent: every script still takes the
+  plain `<name>.graphml` path and the `.zst` is decompressed **in memory** (never to a temp file).
+  Consequences: `readPageUrl` is **async**; use `graphExists`, never `existsSync`, on a graph path;
+  reading needs Node ≥ 22.15 for native zstd (`.nvmrc` pins 24 — `nvm use`, the system default here
+  is Node 20); and shell globs on `*.graphml` no longer match a reclaimed directory.
 - The `cookie-lifecycle` / `cookie-dossier` skills drive this end-to-end via the
   `cookie-lifecycle-analyst` / `cookie-analyst` subagents.
 

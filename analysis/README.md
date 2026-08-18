@@ -88,6 +88,7 @@ design choice: see `output/audit-2026-08-02/mcp-headtohead.md`.
 
 | module | role |
 |---|---|
+| `graph-source.mjs` | opens a graph plain **or archived** (`.zst`/`.gz`), decompressing in memory. `graphStream`, `readPageUrl` (async), `graphBase`, `graphExists`, `isGraphPath`. Never `existsSync` a `.graphml` path directly — use `graphExists` |
 | `graphml-stream.mjs` | the streaming graphml reader — **never `readFileSync` a multi-GB graph** |
 | `host-role.mjs` | `roleOf(host)` → `{owner, categories, roles, source}` from the Tracker Radar snapshot |
 | `cookie-evidence.mjs` | Stage 1 evidence fusion; **reads the HTTP channel** (`.cookie-network.json`) |
@@ -423,7 +424,30 @@ analysis/archive-graph.sh --reclaim output         # delete originals that re-ve
 Writes `<graph>.graphml.zst` plus a `<graph>.graphml.archive.json` manifest recording exact byte
 counts, the source SHA-256, and the restore command.
 
-### Restoring — the obvious command does not work
+### The analysis scripts read archives directly — do not decompress first
+
+Every script here takes the **plain `.graphml` path** whether or not the plaintext file still
+exists. `lib/graph-source.mjs` resolves it to whatever is on disk and decompresses **in memory**:
+
+```bash
+node analysis/cookie-reads.mjs output/.../page_graph_foo.graphml --json   # foo.graphml.zst on disk
+```
+
+Nothing is written to a temp file — a 4 MB archive expands to 6.6 GB, so materialising it would
+undo the archiving. The decoder is composed onto the existing streaming parsers, so a whole graph
+never sits in memory. Delta (7,075,801,690 B, a 4.2 MB archive) streams end-to-end in **29 s**.
+
+Two costs to know:
+
+- **Peak RSS is ~2.5 GB on the largest graphs.** That is the zstd decoder allocating the 2 GB
+  window the `--long=31` archives declare, not the graph being buffered.
+- **`nvm use` first.** Reading `.zst` needs Node's native zstd (≥ 22.15). `.nvmrc` pins 24; this
+  machine's default `node` is still 20 and will fail with an explicit message telling you so.
+
+Note that shell globs no longer match: `*.graphml` finds nothing once a directory is reclaimed.
+Use `*.graphml.zst` and strip the suffix, or pass the path explicitly.
+
+### Restoring to plaintext — the obvious command does not work
 
 ```bash
 zstd -d --long=31 page_graph_....graphml.zst
@@ -432,7 +456,7 @@ zstd -d --long=31 page_graph_....graphml.zst
 A plain `zstd -d` **fails**: `Frame requires too much memory for decoding`. The archive's window
 exceeds zstd's default 128 MiB decode budget, so `--long=31` is required. zstd names the flag in
 its error, but the number it suggests differs per file — `--long=31` is the upper bound and always
-works. The analysis scripts cannot read `.zst` at all; decompress first.
+works.
 
 ### Do not prune before archiving
 
