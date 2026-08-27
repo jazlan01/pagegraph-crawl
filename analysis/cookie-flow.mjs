@@ -227,25 +227,34 @@ for (let round = 0; round < maxRounds; round++) {
     if (!args) { // still may propagate nothing
       continue;
     }
-    // which seeds appear in this call's args?
+    // which seeds appear in this call's args? Track WHICH seed matched per cookie
+    // name: when two cookies' values sit in the same call args, a shared "first
+    // seed found" would attribute cookie A's bytes to cookie B's record.
     let originNames = null;
+    const seedByName = new Map(); // name -> the matched seed carrying that name
     for (const seed of seeds) {
       if (args.length >= seed.length && args.includes(seed)) {
         const names = taint.get(seed);
         if (!originNames) originNames = new Set();
-        for (const n of names) originNames.add(n);
+        for (const n of names) {
+          originNames.add(n);
+          if (!seedByName.has(n)) seedByName.set(n, seed);
+        }
       }
     }
     if (originNames) {
       const net = isNetworkSink(method);
       const dest = net ? destUrlFromArgs(args) : null;
-      const idx = (() => { for (const seed of seeds) { const p = args.indexOf(seed); if (p !== -1) return p; } return 0; })();
-      const snip = args.slice(Math.max(0, idx - 30), idx + SNIP);
       const viaUrl = via ? scriptUrl(via) : null;
       const key = `${method}|${viaUrl}|${dest || ""}`;
       for (const name of originNames) {
+        const seed = seedByName.get(name);
+        const idx = Math.max(0, args.indexOf(seed));
+        const snip = args.slice(Math.max(0, idx - 30), idx + SNIP);
         rec(consumersByCookie, name, key, { method, viaScriptUrl: viaUrl, isNetworkSink: net, destUrl: dest, argSnippet: snip, round });
-        if (net) rec(netHitsByCookie, name, `${method}|${dest || viaUrl}`, { method, destUrl: dest, viaScriptUrl: viaUrl, round });
+        // argSnippet/matchedValue on the NETWORK hit too — this record is what
+        // cookie-evidence keeps, and the outbound bytes are the evidence.
+        if (net) rec(netHitsByCookie, name, `${method}|${dest || viaUrl}`, { method, destUrl: dest, viaScriptUrl: viaUrl, round, argSnippet: snip, matchedValue: seed.slice(0, 500) });
       }
       // propagate: the return value becomes a new tainted value carrying same origins
       if (value != null) {
