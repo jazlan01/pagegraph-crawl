@@ -144,10 +144,33 @@ export const buildGraphFeatures = (evidence) => {
       // The redirect hop sequence, in order, for chains this cookie's setter took part in.
       redirectChain: (ev.redirect?.chains || []).map((c) => c.map((h) => `${h.host}${h.status ? `(${h.status})` : ""}`).join(" -> ")),
 
-      // The modernisation: value transformed by JS, then sent.
+      // DEPRECATED (misnomer — means js-initiated send). `transformedThenSent` derives from
+      // jsExfil.fired, which is true for ANY js-initiated send, raw value included; no transform
+      // is implied or checked. Kept computing so old outputs keep their meaning; new consumers
+      // read `jsInitiatedSend` / `derivedValueSent` and the per-destination
+      // `outboundTransmissions` below, which state what actually left.
       transformedThenSent: !!ev.jsExfil?.fired,
       transformedThenSentCount: (ev.jsExfil?.destinations || []).length,
       transformCount: (ev.transforms || []).length,
+      // What transformedThenSent actually meant all along:
+      jsInitiatedSend: !!ev.jsExfil?.fired,
+      // A genuinely derived value (taint round > 0) reached the network.
+      derivedValueSent: (ev.outbound || []).some((o) => o.sentForm === "derived"),
+
+      // Per-destination outbound characterisation — ENUMS ONLY. No excerpts and no part KEYS:
+      // a key like "consentId" is a OneTrust tell, and this vector feeds the name-blind Pass B.
+      // Kinds like "UUID" are shape, not identity. The full records (with request bytes) live
+      // in ev.outbound, persisted separately for Pass C and the report.
+      outboundTransmissions: (ev.outbound || []).slice(0, 20).map((o) => ({
+        host: o.host,
+        party: o.party,
+        channels: o.channels,
+        sentForm: o.sentForm,
+        carriesIdentifier: o.carriesIdentifier,
+        identifierKinds: o.identifierKinds,
+        coverage: o.coverage,
+        valueSnapshot: o.valueSnapshot,
+      })),
 
       // ---- flow: where did the value COME FROM ------------------------------
       // Infiltration — arrived in a response, then was stored. A server-minted id or a
