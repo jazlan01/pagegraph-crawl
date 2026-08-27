@@ -28,10 +28,11 @@ import {
   graphExists,
   unwrap,
 } from "./lib/graphml-stream.mjs";
+import { namedParts, identifierNeedles } from "./lib/value-parts.mjs";
 
 // Values shorter than this match too much unrelated text to be evidence.
 const DEFAULT_MIN_LEN = 8;
-const SNIPPET_PAD = 40;
+const SNIPPET_PAD = 200;
 
 const args = process.argv.slice(2);
 const positional = args.filter((a) => !a.startsWith("--"));
@@ -162,6 +163,31 @@ if (cookieValues.size === 0) {
 }
 
 // ---------------------------------------------------------------------------
+// Part needles. Whole-value matching misses the send that matters most: an
+// identifier part travelling WITHOUT the rest of its cookie (a consentId posted
+// alone to a consent-receipt endpoint), or inside an EARLIER SNAPSHOT of the
+// value whose volatile parts (timestamps) have since drifted. Seed each
+// identifier-grade part of every observed value as its own needle, tagged so
+// downstream can tell a part hit from a full-value hit — the two are different
+// claims and are never summed.
+// A part whose text equals a whole observed value (a single-part cookie like a
+// bare UUID) is skipped: the full-value needle already covers it, and seeding
+// both would double-count the same match.
+// ---------------------------------------------------------------------------
+
+const cookiePartNeedles = new Map(); // name -> Map(partText -> {key, kind})
+for (const [name, values] of cookieValues) {
+  const m = new Map();
+  for (const v of values) {
+    for (const p of identifierNeedles(namedParts(name, v))) {
+      if (values.has(p.text)) continue;
+      if (!m.has(p.text)) m.set(p.text, { key: p.key, kind: p.kind });
+    }
+  }
+  if (m.size) cookiePartNeedles.set(name, m);
+}
+
+// ---------------------------------------------------------------------------
 // Encodings a value can be wearing by the time it reaches a body. A tracker that
 // base64s an identifier is still exfiltrating it, so matching only raw
 // substrings understates the problem.
@@ -249,30 +275,61 @@ for await (const line of rl) {
   }
 
   for (const [name, values] of cookieValues) {
+    const pushHit = (value, form, encoding, extra) => {
+      if (!findings.has(name)) findings.set(name, []);
+      const initiatorNode = requestInitiator.get(String(rec.requestId));
+      const snippet = snippetAround(
+        haystacks.find((h) => h.includes(form)),
+        form,
+      );
+      findings.get(name).push({
+        cookie: name,
+        value,
+        encoding,
+        kind: rec.kind,
+        method: rec.method ?? null,
+        status: rec.status ?? null,
+        url: rec.url,
+        requestId: rec.requestId,
+        truncated: Boolean(rec.truncated),
+        initiatorScript: initiatorNode
+          ? (scriptUrlByNode.get(initiatorNode) ?? initiatorNode)
+          : null,
+        snippet,
+        // The encoded form as it sits in the body, and its offset WITHIN the
+        // snippet — computed on the final snippet string (never haystack
+        // arithmetic, which the "…" clipping markers would shift).
+        matchedText: form.slice(0, 500),
+        matchOffset: snippet ? snippet.indexOf(form.slice(0, 500)) : -1,
+        ...extra,
+      });
+    };
+
+    let fullHit = false;
     for (const value of values) {
       for (const [form, encoding] of encodingsFor(value)) {
-        const hay = haystacks.find((h) => h.includes(form));
-        if (!hay) continue;
-        if (!findings.has(name)) findings.set(name, []);
-        const initiatorNode = requestInitiator.get(String(rec.requestId));
-        findings.get(name).push({
-          cookie: name,
-          value,
-          encoding,
-          kind: rec.kind,
-          method: rec.method ?? null,
-          status: rec.status ?? null,
-          url: rec.url,
-          requestId: rec.requestId,
-          truncated: Boolean(rec.truncated),
-          initiatorScript: initiatorNode
-            ? (scriptUrlByNode.get(initiatorNode) ?? initiatorNode)
-            : null,
-          snippet: snippetAround(hay, form),
-        });
+        if (!haystacks.some((h) => h.includes(form))) continue;
+        pushHit(value, form, encoding, { matchScope: "full" });
+        fullHit = true;
         // One hit per value per body is enough; don't report the same leak once
         // per encoding.
         break;
+      }
+    }
+
+    // Part needles run only when NO whole value matched this body: a full hit
+    // already contains every part, so a part hit there is redundant, and the
+    // scopes must stay disjoint for counting.
+    if (!fullHit && cookiePartNeedles.has(name)) {
+      for (const [text, meta] of cookiePartNeedles.get(name)) {
+        for (const [form, encoding] of encodingsFor(text)) {
+          if (!haystacks.some((h) => h.includes(form))) continue;
+          pushHit(text, form, encoding, {
+            matchScope: "part",
+            matchedPart: { key: meta.key, kind: meta.kind },
+          });
+          break;
+        }
       }
     }
   }
