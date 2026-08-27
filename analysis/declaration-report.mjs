@@ -96,7 +96,7 @@ const rowHtml = (r) => {
     <td class="ck"><code>${esc(r.name)}</code><div class="hst">${esc(r.host || "")}</div></td>
     <td>${decl}${r.declaredGroups.length ? `<div class="grp">${esc(r.declaredGroups.join(", "))}</div>` : ""}</td>
     <td>${obs}${r.observedTcf.length ? `<div class="grp">${esc(r.observedTcf.slice(0,4).join(" "))}</div>` : ""}</td>
-    <td><span class="verdict ${m.cls}">${esc(m.label)}</span><div class="detail">${esc(r.detail)}</div></td>
+    <td><span class="verdict ${m.cls}">${esc(m.label)}</span><div class="detail">${esc(r.detail)}</div>${(r.outboundFacts || []).length ? `<div class="obfacts"><b>observed on the wire:</b> ${r.outboundFacts.map(esc).join("; ")}</div>` : ""}</td>
   </tr>`;
 };
 
@@ -139,6 +139,7 @@ td{padding:.7rem .6rem;border-bottom:1px solid var(--line);vertical-align:top}
 .ck code{color:var(--pool);font-family:var(--mono);font-size:.9rem}
 .hst,.grp{color:var(--muted);font-size:.78rem;margin-top:.15rem}
 .detail{color:var(--muted);font-size:.85rem;margin-top:.25rem;max-width:62ch}
+.obfacts{color:var(--salmon);font-size:.85rem;margin-top:.25rem;max-width:62ch;line-height:1.45} .obfacts b{color:inherit}
 .chip{display:inline-block;padding:.08rem .5rem;border-radius:5px;font-size:.82rem;border:1px solid var(--line);margin:.05rem}
 .chip.trk{color:var(--salmon);border-color:rgba(252,125,115,.4)}
 .chip.ben{color:var(--seagreen);border-color:rgba(64,235,194,.35)}

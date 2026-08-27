@@ -74,10 +74,25 @@ export const buildComparisonRow = ({ name, host, declaration, observedDoc }) => 
     }
   }
 
+  // Deterministic wire facts: identifier-carrying sends to third parties, stated from the
+  // per-destination outbound records (computed from actual request bytes — no LLM involved).
+  // Rendered separately from the classifier's prose so the two provenances never blur.
+  const outboundFacts = (observedDoc?.outbound || [])
+    .filter((o) => o.carriesIdentifier === true && o.party === "third")
+    .slice(0, 4)
+    .map((o) => {
+      const idParts = (o.matchedParts || []).filter((p) => p.isIdentifier).map((p) => `${p.key} (${p.kind})`);
+      const what = o.sentForm === "fragment" ? "identifier part"
+        : o.sentForm === "derived" ? "derived value incl. identifier"
+        : `${o.sentForm === "re-encoded" ? "re-encoded" : "raw"} value incl. persistent id`;
+      return `${what}${idParts.length ? ` — ${idParts.join(", ")}` : ""} sent to ${o.host}`;
+    });
+
   return {
     name, host,
     declaredCats, declaredGroups: dec?.entry?.declaredGroupNames || [], declaredDesc: dec?.entry?.description || null,
     match: dec?.match || null,
+    outboundFacts,
     observed: obsLabels, observedConf: bestConf >= 0 ? Object.keys(RANK)[bestConf] : null,
     // Per-label evidence, carried through so the report can say WHY each label was assigned rather
     // than showing a bare chip. `reasoning` is the classifier's ≤15-word justification per label.
