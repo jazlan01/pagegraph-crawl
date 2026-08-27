@@ -11,6 +11,9 @@
 //      through the back door. Mutation is conveyed by COUNTS and FLAGS (distinctValues, mutated,
 //      timestampAdvanced), never by the bytes. Script URLs are kept: they are structural graph
 //      endpoints, not content, and resolving a destination host to a purpose is B's whole job.
+//      DERIVED ENUMS about the outbound bytes are admitted (sentForm raw|re-encoded|fragment|
+//      derived, carriesIdentifier, identifierKinds like "UUID" — shape, not identity); the bytes
+//      themselves, and part KEYS like "consentId" (a vendor tell), are not.
 //
 // De-dup, don't truncate: transmissions collapse by (host, method, channel) with a count; distinct
 // hosts/scripts/paths are all kept. A hard cap fires only in pathological cases and is disclosed as
@@ -67,6 +70,22 @@ export const buildBehaviourSubgraph = (ev, f = {}) => {
     .map((d) => ({ host: d.host, method: d.method || "js", party: d.party, channel: "js-initiated" }));
   const transmissions = dedupCount([...auto, ...jsSent], (x) => `${x.host}|${x.method}|${x.channel}`);
 
+  // Join the per-destination outbound characterisation (enums only) onto each transmission:
+  // what FORM the value left in and whether the outbound bytes still carried an identifier.
+  // Omitted when unknown so records from before the characteriser render unchanged.
+  const outByHost = new Map((f.outboundTransmissions || []).map((o) => [o.host, o]));
+  for (const t of transmissions) {
+    const o = outByHost.get(t.host);
+    if (!o) continue;
+    const chan = t.channel === "auto-cookie-header" ? "auto-cookie-header" : null;
+    // js-initiated transmissions map to the js-body/js-url channels; auto to auto-cookie-header.
+    if (chan ? o.channels.includes(chan) : o.channels.some((c) => c !== "auto-cookie-header")) {
+      t.sentForm = o.sentForm;
+      t.carriesIdentifier = o.carriesIdentifier;
+      if (o.identifierKinds?.length) t.identifierKinds = o.identifierKinds;
+    }
+  }
+
   // --- taint paths: value → consumer script → transform round → destination --
   // This is the behavioural signature modern tracking hides behind: the value is read, transformed
   // by JS, and only then sent. round>0 means a transform happened before the send.
@@ -86,7 +105,17 @@ export const buildBehaviourSubgraph = (ev, f = {}) => {
     transmissions: capped(transmissions),
     taintPaths: capped(taintPaths),
     redirectChains: redirectChains.slice(0, HARD_CAP),
-    bodyExfil: { count: ev.bodyExfil?.hits || 0, toHosts: (ev.bodyExfil?.destinations || []).map((d) => d.host).filter(Boolean), assessed: !!ev.bodyExfil?.assessed },
+    bodyExfil: {
+      count: ev.bodyExfil?.hits || 0,
+      toHosts: (ev.bodyExfil?.destinations || []).map((d) => d.host).filter(Boolean),
+      assessed: !!ev.bodyExfil?.assessed,
+      // Per-destination: what form the value took and whether an identifier was in it. Includes
+      // part-only hits (an identifier part travelling WITHOUT the rest of its cookie), which
+      // whole-value counting cannot see.
+      perDest: (f.outboundTransmissions || [])
+        .filter((o) => o.channels?.includes("js-body"))
+        .map((o) => ({ host: o.host, party: o.party, sentForm: o.sentForm, carriesIdentifier: o.carriesIdentifier, coverage: o.coverage })),
+    },
     bodyInfil: { count: ev.bodyInfil?.hits || 0, fromHosts: ev.bodyInfil?.sources || [], lowConfidence: !!ev.bodyInfil?.lowConfidence, assessed: !!ev.bodyInfil?.assessed },
 
     // derived behavioural flags (from the existing feature computation) — alongside the edges,
@@ -103,7 +132,10 @@ export const buildBehaviourSubgraph = (ev, f = {}) => {
       setterInRedirectChain: f.setterInRedirectChain,
       setterAlsoEndpointForOtherCookies: f.setterAlsoEndpointForOtherCookies,
       cookieHeaderRequests: f.cookieHeaderRequests,
+      // transformedThenSent kept one release for old renderers; it means "js-initiated send".
       transformedThenSent: f.transformedThenSent,
+      jsInitiatedSend: f.jsInitiatedSend,
+      derivedValueSent: f.derivedValueSent,
       readerScriptCount: f.readerScriptCount,
       readerAttributionIsJarWide: true,
       writerSetMaxJaccard: f.writerSetMaxJaccard,
