@@ -12,7 +12,7 @@ Plain Node ESM — no build step. Run from the repo root.
 
 ## Everything in here, at a glance
 
-37 scripts and 10 `lib/` modules. Grouped by the job, because the filenames alone do not say which
+41 scripts and 20 `lib/` modules. Grouped by the job, because the filenames alone do not say which
 of several similar tools is the current one.
 
 ### The report pipeline — run in this order
@@ -91,6 +91,9 @@ design choice: see `output/audit-2026-08-02/mcp-headtohead.md`.
 | `host-role.mjs` | `roleOf(host)` → `{owner, categories, roles, source}` from the Tracker Radar snapshot |
 | `cookie-evidence.mjs` | Stage 1 evidence fusion; **reads the HTTP channel** (`.cookie-network.json`) |
 | `cookie-features.mjs` | Stage 2 deterministic feature vector |
+| `value-parts.mjs` | a value as named, classified parts (`namedParts`, `identifierNeedles`) — which part is identifier-grade, which is volatile. Shared with `decode-cookie-values.mjs`; strictly non-cryptographic |
+| `outbound-characterise.mjs` | per-**destination** record of what actually left: `sentForm` (raw / re-encoded / fragment / derived), `carriesIdentifier` (true / false / `"unknown"`), the matched parts, and the request bytes with highlight offsets |
+| `graph-features.mjs` | the classifier's graph feature vector. `transformedThenSent` is **deprecated** — it was true for any JS-initiated send and never checked for a transform; read `jsInitiatedSend` and `derivedValueSent` |
 | `tcf-rules.mjs` | Stage 3 rule prior |
 | `tcf-taxonomy.mjs` | the three label vocabularies + the confidence levels |
 | `verdict-schema.mjs` | validates any head's verdict against the taxonomy |
@@ -166,6 +169,13 @@ Two behaviours worth knowing:
 - **Outbound only by default.** A value in a *response* body is usually its origin (a script whose
   source hardcodes it), not a leak. `--include-responses` adds them, which is how you spot a partner
   echoing an identifier back.
+- **Identifier PARTS are matched too, and tagged separately.** Whole-value matching misses the send
+  that matters most: an identifier travelling *without* the rest of its cookie (a `consentId` posted
+  alone to a consent-receipt endpoint), or inside an earlier snapshot of the value whose timestamps
+  have since drifted. Each identifier-grade part (`lib/value-parts.mjs`) is seeded as its own needle,
+  ≥16 chars so a hit is not coincidence. Hits carry `matchScope` `"full"` or `"part"` and are
+  **different claims — never sum them**; part needles run only on bodies where no whole value matched,
+  so the two scopes are disjoint.
 
 If nothing is found, check the reported `dropped` count first: bodies skipped by the MIME filter or
 the size budget mean the result is not proof of absence. Re-run the crawl with `--save-bodies-full`
