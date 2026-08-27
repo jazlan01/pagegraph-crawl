@@ -440,107 +440,38 @@ const rowHtml = (r) => {
 
 // One PAGE per site inside a single HTML file: sections toggled by a hash router, so the report
 // stays one self-contained artifact while each site reads as its own page.
+const slugOf = (site) => String(site).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 
-const siteSection = (s) => {
-  const u = s.rows.filter((r) => r.status === "mismatch-under-declared").length;
-  const c = s.rows.filter((r) => r.status === "contradictory-declaration").length;
-  return `<h2>${esc(s.site)} <span class="badge">${s.cmp || "no CMP"}</span></h2>
-  <div class="sitesum">${s.rows.length} cookies · <span class="bad">${u} under-declared</span> · <span class="bad">${c} contradictory</span></div>
+const siteCounts = (s) => ({
+  u: s.rows.filter((r) => r.status === "mismatch-under-declared").length,
+  c: s.rows.filter((r) => r.status === "contradictory-declaration").length,
+  idSends: s.rows.filter((r) => (r.outbound || []).some((o) => o.carriesIdentifier === true && o.party === "third")).length,
+});
+
+const sitePage = (s) => {
+  const { u, c, idSends } = siteCounts(s);
+  return `<section class="page" id="site-${slugOf(s.site)}" hidden>
+  <h1>${esc(s.site)} <span class="badge">${esc(s.cmp || "no CMP")}</span></h1>
+  <div class="sitesum">${s.rows.length} cookies · <span class="${u ? "bad" : "ok"}">${u} under-declared</span> · <span class="${c ? "bad" : "ok"}">${c} contradictory</span> · <span class="${idSends ? "bad" : "ok"}">${idSends} cookie(s) whose identifier reached a third party</span></div>
   <div class="tbl-scroll"><table><thead><tr>
     <th>Cookie</th><th>Observed (ours, behaviour)</th><th>Declared (site CMP)</th><th>MCP (name corpus)</th><th>Verdict — declared vs observed</th>
-  </tr></thead><tbody>${s.rows.map(rowHtml).join("")}</tbody></table></div>`;
+  </tr></thead><tbody>${s.rows.map(rowHtml).join("")}</tbody></table></div>
+</section>`;
 };
 
-const html = `<!doctype html><html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Cookie classification — observed vs declared vs MCP</title>
-<style>
-:root{--navy:#0E1227;--panel:#161B33;--sky:#6390EE;--pool:#00DBFF;--salmon:#FC7D73;--seagreen:#40EBC2;--gold:#F0B53D;--white:#FFFFFF;--muted:#9AA2B8;--line:#2A3150;
---sans:ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;--mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace}
-*{box-sizing:border-box} body{margin:0;background:var(--navy);color:var(--white);font-family:var(--sans);font-size:1.02rem;line-height:1.55;-webkit-font-smoothing:antialiased}
-.wrap{max-width:1240px;margin:0 auto;padding:3rem 1.5rem 5rem}
-h1{font-size:2.1rem;margin:0 0 .3rem;letter-spacing:-.01em} h2{font-size:1.35rem;margin:2.8rem 0 .4rem;letter-spacing:-.01em}
-.eyebrow{text-transform:uppercase;letter-spacing:.14em;font-size:.8rem;color:var(--sky);font-weight:600}
-.sub{color:var(--muted);font-size:1rem;margin-bottom:1.6rem}
-.badge{font-size:.75rem;color:var(--muted);border:1px solid var(--line);border-radius:5px;padding:.05rem .45rem;vertical-align:middle;text-transform:none;letter-spacing:0}
-.sitesum{color:var(--muted);font-size:.9rem;margin-bottom:.5rem} .sitesum .bad{color:var(--salmon)}
-.headline{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:1.5rem 1.8rem;margin:1.4rem 0}
-.headline .n{font-size:2.8rem;font-weight:700;color:var(--salmon);line-height:1} .headline .n.zero{color:var(--seagreen)}
-.headline .cap{color:var(--muted);max-width:66ch}
-.tiles{display:flex;flex-wrap:wrap;gap:.7rem;margin:1.2rem 0}
-.tile{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:.8rem 1rem;min-width:8rem}
-.tile .v{font-size:1.5rem;font-weight:700;font-variant-numeric:tabular-nums} .tile .k{font-size:.78rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
-.tile.bad .v{color:var(--salmon)} .tile.ok .v{color:var(--seagreen)}
-.note{background:rgba(99,144,238,.08);border-left:3px solid var(--sky);padding:.9rem 1.15rem;border-radius:0 8px 8px 0;margin:1.1rem 0;color:#C9D2EA;font-size:.92rem}
-table{width:100%;border-collapse:collapse;margin-top:.4rem;font-size:.92rem} th{text-align:left;color:var(--muted);font-weight:600;font-size:.76rem;text-transform:uppercase;letter-spacing:.05em;padding:.5rem .55rem;border-bottom:1px solid var(--line)}
-td{padding:.6rem .55rem;border-bottom:1px solid var(--line);vertical-align:top}
-.ck code{color:var(--pool);font-family:var(--mono);font-size:.88rem} .hst,.grp{color:var(--muted);font-size:.76rem;margin-top:.12rem}
-.detail{color:var(--muted);font-size:.82rem;margin-top:.22rem;max-width:60ch}
-.ev{color:#B8C0D8;font-size:.8rem;line-height:1.4;margin-top:.3rem;max-width:52ch}
-.ev-l{font-weight:600;font-size:.76rem} .ev-l.trk{color:var(--salmon)} .ev-l.ben{color:var(--seagreen)}
-.gev{margin:.45rem 0 .1rem}
-.gev>summary{cursor:pointer;color:var(--sky);font-size:.78rem;list-style:none;display:inline-block}
-.gev>summary::-webkit-details-marker{display:none}
-.gev>summary::before{content:"▸ graph evidence"}
-.gev[open]>summary{color:var(--pool)} .gev[open]>summary::before{content:"▾ graph evidence"}
-.gev>summary{font-size:0} .gev>summary::before{font-size:.78rem}
-.gev-g{margin:.4rem 0 .4rem .1rem;max-width:60ch}
-.gev-h{display:block;text-transform:uppercase;letter-spacing:.05em;font-size:.66rem;color:var(--muted);font-weight:600}
-.gev ul{margin:.15rem 0 .15rem 1.1rem;padding:0}
-.gev li{font-size:.82rem;color:#C9D2EA;margin:.12rem 0;line-height:1.5}
-.gev li.emore{list-style:none;color:var(--muted);font-style:italic;font-size:.76rem;margin-left:-.6rem}
-.eh{font-family:var(--mono);font-size:.8rem;color:#D6DCF0}
-.echain{font-family:var(--mono);font-size:.76rem;color:#C9D2EA}
-.escript{font-family:var(--mono);font-size:.7rem;color:var(--muted);margin:.05rem 0 .1rem;word-break:break-all;max-width:54ch}
-.emeth{font-family:var(--mono);font-size:.72rem;color:var(--muted);font-weight:600}
-.earr{color:var(--muted)} .emut{color:var(--muted);font-size:.74rem;font-style:italic}
-.ecnt{color:var(--muted);font-size:.72rem;margin-left:.25rem;font-variant-numeric:tabular-nums}
-.etag{display:inline-block;font-size:.66rem;font-weight:700;padding:.02rem .34rem;border-radius:4px;letter-spacing:.02em;vertical-align:baseline}
-.et-auto{background:rgba(240,181,61,.16);color:var(--gold)}
-.et-js{background:rgba(64,235,194,.15);color:var(--seagreen)}
-.et-http{background:rgba(99,144,238,.16);color:var(--sky)}
-.et-mut{background:rgba(154,162,184,.14);color:var(--muted)}
-.et-third{background:rgba(252,125,115,.15);color:var(--salmon)}
-.et-first{background:rgba(154,162,184,.14);color:var(--muted)}
-.gev.code>summary::before{content:"▸ source — where it's set, read & sent"} .gev.code[open]>summary::before{content:"▾ source — where it's set, read & sent"}
-.cs-site{margin:.5rem 0 .55rem;padding:.5rem .6rem;background:#0A0E1F;border:1px solid var(--line);border-radius:8px;border-left:2px solid var(--sky)}
-.cs-hd{display:flex;flex-wrap:wrap;align-items:baseline;gap:.35rem;font-size:.78rem;margin-bottom:.35rem}
-.cs-what{font-weight:700;font-size:.66rem;text-transform:uppercase;letter-spacing:.05em;padding:.03rem .35rem;border-radius:4px}
-.cs-writes{background:rgba(252,125,115,.16);color:var(--salmon)} .cs-reads{background:rgba(99,144,238,.16);color:var(--sky)} .cs-deletes{background:rgba(154,162,184,.16);color:var(--muted)}
-.cs-sends{background:rgba(240,181,61,.18);color:var(--gold)}
-.cs-sendsite{border-left-color:var(--gold)}
-.cs-dest{font-family:var(--mono);font-size:.8rem;color:var(--salmon);font-weight:600;word-break:break-all}
-.cs-method{font-family:var(--mono);font-size:.72rem;color:var(--muted)}
-.cs-sub{margin-top:.15rem;font-size:.72rem} .cs-from{color:var(--muted);font-size:.7rem;text-transform:uppercase;letter-spacing:.04em}
-.cs-note{font-size:.74rem;color:var(--muted);line-height:1.5;margin:.35rem 0 .1rem;padding:.35rem .5rem;border-left:2px solid var(--line);background:rgba(154,162,184,.05)} .cs-note code{color:var(--pool)}
-.cs-readsite{border-left-style:dashed;border-left-color:var(--sky)}
-.cs-inferred{font-size:.64rem;text-transform:uppercase;letter-spacing:.04em;color:var(--sky);border:1px dashed rgba(99,144,238,.5);border-radius:3px;padding:0 .3rem;margin-left:auto}
-.cs-reason{font-size:.74rem;color:var(--muted);font-style:italic;margin-top:.2rem}
-.cs-url{font-family:var(--mono);font-size:.76rem;color:var(--pool);text-decoration:none;word-break:break-all} .cs-url:hover{text-decoration:underline}
-.cs-loc{font-family:var(--mono);font-size:.76rem;color:var(--gold);font-variant-numeric:tabular-nums}
-.cs-inline,.cs-chan{font-size:.64rem;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);border:1px solid var(--line);border-radius:3px;padding:0 .28rem}
-.cs-code{font-family:var(--mono);font-size:.74rem;line-height:1.5;color:#C9D2EA;background:transparent;margin:.15rem 0;padding:.3rem .4rem;overflow-x:auto;white-space:pre-wrap;word-break:break-all;border-radius:5px;max-width:60ch;border:1px solid rgba(42,49,80,.6)}
-.cs-mark{color:var(--seagreen);font-weight:700;background:rgba(64,235,194,.14);padding:0 .1rem;border-radius:2px}
-.cs-nosrc{font-size:.76rem;color:var(--muted);font-style:italic;margin:.1rem 0}
-.cs-stack{font-family:var(--mono);font-size:.7rem;color:var(--muted);margin-top:.2rem;line-height:1.5;word-break:break-all} .cs-fl{color:#6B7391} .cs-arr{color:var(--line)}
-.cs-more{font-size:.72rem;color:var(--muted);font-style:italic;margin-top:.2rem}
-.why{margin:.45rem 0 .2rem;font-size:.85rem;line-height:1.45;color:#D6DCF0;max-width:56ch}
-.why-h{color:var(--pool);font-weight:600;font-size:.76rem;text-transform:uppercase;letter-spacing:.04em}
-.gev.llm>summary::before{content:"▸ classifier reasoning"} .gev.llm[open]>summary::before{content:"▾ classifier reasoning"}
-.pass-l{font-size:.8rem;color:#C9D2EA;margin:.1rem 0} .pass-s{font-size:.8rem;color:var(--muted);line-height:1.4;max-width:56ch}
-.p3{display:inline-block;font-size:.78rem;margin:.4rem 0 .1rem;padding:.12rem .5rem;border-radius:5px;border:1px solid var(--line)}
-.p3-t{font-weight:700;font-size:.68rem;text-transform:uppercase;letter-spacing:.06em;margin-right:.35rem}
-.p3.p3-none{color:var(--muted)} .p3.p3-a{color:var(--sky);border-color:rgba(99,144,238,.4)}
-.p3.p3-b{color:var(--seagreen);border-color:rgba(64,235,194,.4)} .p3.p3-blend{color:var(--gold);border-color:rgba(240,181,61,.4)}
-.tile .v.p3a{color:var(--sky)} .tile .v.p3b{color:var(--seagreen)} .tile .v.p3blend{color:var(--gold)}
-.chip{display:inline-block;padding:.06rem .45rem;border-radius:5px;font-size:.8rem;border:1px solid var(--line);margin:.04rem}
-.chip.trk{color:var(--salmon);border-color:rgba(252,125,115,.4)} .chip.ben{color:var(--seagreen);border-color:rgba(64,235,194,.35)}
-.conf{color:var(--muted);font-size:.76rem} .muted{color:var(--muted)}
-.verdict{font-weight:600;font-size:.88rem} .verdict.bad{color:var(--salmon)} .verdict.warn{color:var(--gold)} .verdict.ok{color:var(--seagreen)} .verdict.muted{color:var(--muted)}
-tr.st-bad td{background:rgba(252,125,115,.05)} .tbl-scroll{overflow-x:auto}
-footer{margin-top:3rem;padding-top:1.5rem;border-top:1px solid var(--line);color:var(--muted);font-size:.84rem}
-</style></head><body><div class="wrap">
-  <div class="eyebrow">VaultJS · Cookie compliance</div>
+// ---- overview page -----------------------------------------------------------
+const siteIndexRow = (s) => {
+  const { u, c, idSends } = siteCounts(s);
+  return `<tr>
+    <td><a class="site-link" href="#site-${slugOf(s.site)}">${esc(s.site)}</a><div class="hst">${esc(s.cmp || "no CMP")}</div></td>
+    <td class="num">${s.rows.length}</td>
+    <td class="num ${u ? "bad" : ""}">${u}</td>
+    <td class="num ${c ? "bad" : ""}">${c}</td>
+    <td class="num ${idSends ? "bad" : ""}">${idSends}</td>
+  </tr>`;
+};
+
+const overviewPage = `<section class="page" id="overview">
   <h1>Observed vs declared vs MCP — per cookie, per site</h1>
   <div class="sub">${roll.cookies} cookies across ${roll.sites} sites. Three independent views side by side; the verdict compares only <b>our observed</b> classification against the <b>site's declaration</b>.</div>
 
@@ -564,10 +495,176 @@ footer{margin-top:3rem;padding-top:1.5rem;border-top:1px solid var(--line);color
     <div class="tile"><div class="v p3blend">${roll.p3Blend}</div><div class="k">new blend (neither)</div></div>
   </div>
 
-  ${perSite.map(siteSection).join("")}
+  <h2>Websites</h2>
+  <div class="tbl-scroll"><table class="idx"><thead><tr>
+    <th>Website</th><th>Cookies</th><th>Under-declared</th><th>Contradictory</th><th>Identifier → 3rd party</th>
+  </tr></thead><tbody>${perSite.map(siteIndexRow).join("")}</tbody></table></div>
+</section>`;
 
+const html = `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Cookie classification — observed vs declared vs MCP</title>
+<style>
+:root{--bg:#F7F8FA;--panel:#FFFFFF;--ink:#1C2433;--muted:#5C6575;--line:#E3E7EE;--accent:#2563EB;
+--bad:#C62828;--warn:#A15C00;--ok:#157A55;--code:#3B4252;
+--bad-bg:rgba(198,40,40,.07);--warn-bg:rgba(161,92,0,.09);--ok-bg:rgba(21,122,85,.08);--accent-bg:rgba(37,99,235,.07);
+--sans:ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;--mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace}
+*{box-sizing:border-box} html{background:var(--bg)}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:1.05rem;line-height:1.55;-webkit-font-smoothing:antialiased}
+.nav{position:sticky;top:0;z-index:10;background:var(--panel);border-bottom:1px solid var(--line);padding:.55rem 1.5rem;display:flex;flex-wrap:wrap;align-items:center;gap:.4rem}
+.nav .brand{font-weight:700;font-size:.95rem;margin-right:.8rem;color:var(--ink)}
+.nav a{color:var(--muted);text-decoration:none;font-size:.9rem;padding:.22rem .7rem;border-radius:6px;border:1px solid transparent}
+.nav a:hover{color:var(--ink);background:var(--bg)}
+.nav a.active{color:var(--accent);background:var(--accent-bg);border-color:rgba(37,99,235,.25);font-weight:600}
+.nav .n-bad{display:inline-block;min-width:1.15rem;text-align:center;font-size:.85rem;font-weight:700;color:#fff;background:var(--bad);border-radius:9px;padding:0 .3rem;margin-left:.3rem;vertical-align:baseline}
+.wrap{max-width:1280px;margin:0 auto;padding:2.2rem 1.5rem 5rem}
+h1{font-size:2rem;margin:0 0 .3rem;letter-spacing:-.01em} h2{font-size:1.35rem;margin:2.6rem 0 .4rem;letter-spacing:-.01em}
+.sub{color:var(--muted);font-size:1rem;margin-bottom:1.5rem}
+.badge{font-size:.85rem;color:var(--muted);border:1px solid var(--line);border-radius:5px;padding:.05rem .45rem;vertical-align:middle;font-weight:400}
+.sitesum{color:var(--muted);font-size:.95rem;margin-bottom:.6rem} .sitesum .bad,.bad{color:var(--bad)} .sitesum .ok{color:var(--ok)}
+.headline{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:1.4rem 1.7rem;margin:1.3rem 0;box-shadow:0 1px 2px rgba(16,24,40,.04)}
+.headline .n{font-size:2.7rem;font-weight:700;color:var(--bad);line-height:1} .headline .n.zero{color:var(--ok)}
+.headline .cap{color:var(--muted);max-width:66ch}
+.tiles{display:flex;flex-wrap:wrap;gap:.7rem;margin:1.1rem 0}
+.tile{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:.75rem 1rem;min-width:8rem;box-shadow:0 1px 2px rgba(16,24,40,.04)}
+.tile .v{font-size:1.5rem;font-weight:700;font-variant-numeric:tabular-nums} .tile .k{font-size:.85rem;color:var(--muted)}
+.tile.bad .v{color:var(--bad)} .tile.ok .v{color:var(--ok)}
+.note{background:var(--accent-bg);border-left:3px solid var(--accent);padding:.9rem 1.15rem;border-radius:0 8px 8px 0;margin:1.1rem 0;color:var(--ink);font-size:.95rem}
+table{width:100%;border-collapse:separate;border-spacing:0;margin-top:.4rem;font-size:.95rem;background:var(--panel);border:1px solid var(--line);border-radius:10px}
+/* Sticky column headers: stick just below the nav (height measured into --navh by the router
+   script, since the tab row can wrap). border-collapse must be "separate" — collapsed borders
+   detach from a sticky header — and the bottom rule rides a box-shadow for the same reason. */
+th{text-align:left;color:var(--muted);font-weight:600;font-size:.85rem;padding:.55rem .6rem;background:var(--bg);position:sticky;top:var(--navh,49px);z-index:5;box-shadow:0 1px 0 var(--line)}
+td{padding:.65rem .6rem;border-bottom:1px solid var(--line);vertical-align:top}
+tbody tr:last-child td{border-bottom:none}
+.idx td.num{font-variant-numeric:tabular-nums;font-weight:600} .idx td.num.bad{color:var(--bad)}
+.site-link{color:var(--accent);font-weight:600;text-decoration:none} .site-link:hover{text-decoration:underline}
+/* Optimizely-style names embed a whole URL + random id in the cookie NAME; without break-all
+   one name stretches the row past the viewport. */
+.ck{max-width:30ch}
+.ck code{color:#0F4CBB;font-family:var(--mono);font-size:.92rem;font-weight:600;word-break:break-all;overflow-wrap:anywhere;display:inline-block;max-width:100%}
+.hst,.grp{color:var(--muted);font-size:.85rem;margin-top:.12rem;word-break:break-all}
+.detail{color:var(--muted);font-size:.88rem;margin-top:.22rem;max-width:60ch}
+.ev{color:#3C4557;font-size:.86rem;line-height:1.45;margin-top:.3rem;max-width:52ch}
+.ev-l{font-weight:600;font-size:.85rem} .ev-l.trk{color:var(--bad)} .ev-l.ben{color:var(--ok)}
+.gev{margin:.5rem 0 .15rem}
+.gev>summary{cursor:pointer;color:var(--accent);list-style:none;display:inline-block}
+.gev>summary::-webkit-details-marker{display:none}
+.gev>summary{font-size:0} .gev>summary::before{font-size:.86rem;font-weight:500}
+.gev>summary::before{content:"▸ graph evidence"} .gev[open]>summary::before{content:"▾ graph evidence"}
+.gev-g{margin:.45rem 0 .45rem .1rem;max-width:62ch}
+.gev-h{display:block;font-size:.85rem;color:var(--muted);font-weight:600}
+.gev ul{margin:.15rem 0 .15rem 1.1rem;padding:0}
+.gev li{font-size:.88rem;color:#3C4557;margin:.14rem 0;line-height:1.5}
+.gev li.emore{list-style:none;color:var(--muted);font-style:italic;font-size:.85rem;margin-left:-.6rem}
+.eh{font-family:var(--mono);font-size:.86rem;color:var(--code)}
+.echain{font-family:var(--mono);font-size:.85rem;color:#3C4557}
+.escript{font-family:var(--mono);font-size:.85rem;color:var(--muted);margin:.05rem 0 .1rem;word-break:break-all;max-width:54ch}
+.emeth{font-family:var(--mono);font-size:.85rem;color:var(--muted);font-weight:600}
+.earr{color:var(--muted)} .emut{color:var(--muted);font-size:.85rem;font-style:italic}
+.ecnt{color:var(--muted);font-size:.85rem;margin-left:.25rem;font-variant-numeric:tabular-nums}
+.etag{display:inline-block;font-size:.85rem;font-weight:600;padding:.02rem .38rem;border-radius:4px;vertical-align:baseline}
+.et-auto{background:var(--warn-bg);color:var(--warn)}
+.et-js{background:var(--ok-bg);color:var(--ok)}
+.et-http{background:var(--accent-bg);color:var(--accent)}
+.et-mut{background:rgba(92,101,117,.1);color:var(--muted)}
+.et-third{background:var(--bad-bg);color:var(--bad)}
+.et-first{background:rgba(92,101,117,.1);color:var(--muted)}
+.et-form{background:rgba(92,101,117,.1);color:var(--ink)}
+.et-snap{background:var(--warn-bg);color:var(--warn)}
+.et-id{background:var(--bad-bg);color:var(--bad)}
+.et-noid{background:var(--ok-bg);color:var(--ok)}
+.gev.ob>summary::before{content:"▸ what was sent — per destination"} .gev.ob[open]>summary::before{content:"▾ what was sent — per destination"}
+.ob-box{margin:.5rem 0 .6rem;padding:.55rem .65rem;background:var(--panel);border:1px solid var(--line);border-radius:8px;border-left:3px solid var(--muted);max-width:72ch}
+.ob-box.ob-hot{border-left-color:var(--bad);background:rgba(198,40,40,.025)}
+.ob-hd{display:flex;flex-wrap:wrap;align-items:baseline;gap:.4rem;font-size:.9rem}
+.ob-host{font-family:var(--mono);font-weight:700;color:var(--ink);word-break:break-all}
+.ob-path{font-family:var(--mono);color:var(--muted);font-size:.86rem;word-break:break-all}
+.ob-badge{font-size:.85rem;font-weight:700;padding:.04rem .45rem;border-radius:5px;margin-left:auto}
+.ob-badge.ob-bad{background:var(--bad-bg);color:var(--bad)} .ob-badge.ob-warn{background:var(--warn-bg);color:var(--warn)}
+.ob-badge.ob-ok{background:var(--ok-bg);color:var(--ok)} .ob-badge.ob-unk{background:rgba(92,101,117,.1);color:var(--muted)}
+.ob-parts{font-size:.88rem;color:#3C4557;margin-top:.3rem} .ob-parts code{font-family:var(--mono);color:#0F4CBB;font-weight:600}
+.ob-kind{font-size:.85rem;color:var(--muted)}
+.ob-shared{font-size:.86rem;color:var(--warn);margin-top:.2rem} .ob-shared code{font-family:var(--mono)}
+.ob-excerpt{font-family:var(--mono);font-size:.85rem;line-height:1.55;color:var(--code);background:var(--bg);margin:.35rem 0 .1rem;padding:.45rem .55rem;overflow-x:auto;white-space:pre-wrap;word-break:break-all;border-radius:6px;border:1px solid var(--line)}
+.ob-mark{background:#FFE58A;color:#4A3600;font-weight:700;padding:0 .06rem;border-radius:2px}
+.ob-noexcerpt{font-size:.86rem;color:var(--muted);font-style:italic;margin-top:.3rem} .ob-noexcerpt code{font-style:normal;font-family:var(--mono)}
+.ob-facts{margin-top:.35rem;font-size:.86rem;color:var(--bad);max-width:60ch;line-height:1.45}
+.ob-facts-h{font-weight:700;font-size:.85rem;color:var(--ink)}
+.gev.code>summary::before{content:"▸ source — where it's set, read & sent"} .gev.code[open]>summary::before{content:"▾ source — where it's set, read & sent"}
+.cs-site{margin:.5rem 0 .55rem;padding:.5rem .6rem;background:var(--panel);border:1px solid var(--line);border-radius:8px;border-left:2px solid var(--accent)}
+.cs-hd{display:flex;flex-wrap:wrap;align-items:baseline;gap:.35rem;font-size:.88rem;margin-bottom:.3rem}
+.cs-what{font-weight:700;font-size:.85rem;padding:.03rem .4rem;border-radius:4px}
+.cs-writes{background:var(--bad-bg);color:var(--bad)} .cs-reads{background:var(--accent-bg);color:var(--accent)} .cs-deletes{background:rgba(92,101,117,.1);color:var(--muted)}
+.cs-sends{background:var(--warn-bg);color:var(--warn)}
+.cs-sendsite{border-left-color:var(--warn)}
+.cs-dest{font-family:var(--mono);font-size:.88rem;color:var(--bad);font-weight:600;word-break:break-all}
+.cs-method{font-family:var(--mono);font-size:.85rem;color:var(--muted)}
+.cs-sent{font-size:.86rem;color:#3C4557;margin:.05rem 0 .25rem}
+.cs-sub{margin-top:.15rem;font-size:.85rem} .cs-from{color:var(--muted);font-size:.85rem}
+.cs-note{font-size:.86rem;color:var(--muted);line-height:1.5;margin:.35rem 0 .1rem;padding:.35rem .5rem;border-left:2px solid var(--line);background:var(--bg)} .cs-note code{color:#0F4CBB}
+.cs-readsite{border-left-style:dashed;border-left-color:var(--accent)}
+.cs-inferred{font-size:.85rem;color:var(--accent);border:1px dashed rgba(37,99,235,.45);border-radius:3px;padding:0 .3rem;margin-left:auto}
+.cs-reason{font-size:.86rem;color:var(--muted);font-style:italic;margin-top:.2rem}
+.cs-url{font-family:var(--mono);font-size:.85rem;color:var(--accent);text-decoration:none;word-break:break-all} .cs-url:hover{text-decoration:underline}
+.cs-loc{font-family:var(--mono);font-size:.85rem;color:var(--warn);font-variant-numeric:tabular-nums}
+.cs-inline,.cs-chan{font-size:.85rem;color:var(--muted);border:1px solid var(--line);border-radius:3px;padding:0 .28rem}
+.cs-code{font-family:var(--mono);font-size:.85rem;line-height:1.55;color:var(--code);background:var(--bg);margin:.15rem 0;padding:.35rem .45rem;overflow-x:auto;white-space:pre-wrap;word-break:break-all;border-radius:5px;max-width:62ch;border:1px solid var(--line)}
+.cs-mark{color:var(--ok);font-weight:700;background:var(--ok-bg);padding:0 .1rem;border-radius:2px}
+.cs-nosrc{font-size:.86rem;color:var(--muted);font-style:italic;margin:.1rem 0}
+.cs-stack{font-family:var(--mono);font-size:.85rem;color:var(--muted);margin-top:.2rem;line-height:1.5;word-break:break-all} .cs-fl{color:#8A93A6} .cs-arr{color:var(--line)}
+.why{margin:.45rem 0 .2rem;font-size:.92rem;line-height:1.45;color:var(--ink);max-width:58ch}
+.why-h{color:var(--accent);font-weight:600;font-size:.85rem}
+.gev.llm>summary::before{content:"▸ classifier reasoning"} .gev.llm[open]>summary::before{content:"▾ classifier reasoning"}
+.pass-l{font-size:.88rem;color:#3C4557;margin:.1rem 0} .pass-s{font-size:.88rem;color:var(--muted);line-height:1.45;max-width:58ch}
+.p3{display:inline-block;font-size:.86rem;margin:.4rem 0 .1rem;padding:.12rem .5rem;border-radius:5px;border:1px solid var(--line);background:var(--panel)}
+.p3-t{font-weight:700;font-size:.85rem;margin-right:.35rem}
+.p3.p3-none{color:var(--muted)} .p3.p3-a{color:var(--accent);border-color:rgba(37,99,235,.35)}
+.p3.p3-b{color:var(--ok);border-color:rgba(21,122,85,.35)} .p3.p3-blend{color:var(--warn);border-color:rgba(161,92,0,.35)}
+.tile .v.p3a{color:var(--accent)} .tile .v.p3b{color:var(--ok)} .tile .v.p3blend{color:var(--warn)}
+.chip{display:inline-block;padding:.06rem .45rem;border-radius:5px;font-size:.88rem;border:1px solid var(--line);margin:.04rem;background:var(--panel)}
+.chip.trk{color:var(--bad);border-color:rgba(198,40,40,.35)} .chip.ben{color:var(--ok);border-color:rgba(21,122,85,.3)}
+.conf{color:var(--muted);font-size:.85rem} .muted{color:var(--muted)}
+.verdict{font-weight:600;font-size:.92rem} .verdict.bad{color:var(--bad)} .verdict.warn{color:var(--warn)} .verdict.ok{color:var(--ok)} .verdict.muted{color:var(--muted)}
+tr.st-bad td{background:rgba(198,40,40,.035)}
+/* A scroll container would trap the sticky header inside itself, so the wrapper only becomes a
+   horizontal scroller on narrow viewports where the table genuinely cannot fit. */
+.tbl-scroll{overflow-x:auto}
+@media (min-width:900px){.tbl-scroll{overflow-x:visible}}
+footer{margin-top:3rem;padding-top:1.5rem;border-top:1px solid var(--line);color:var(--muted);font-size:.88rem}
+.page[hidden]{display:none}
+</style></head><body>
+<nav class="nav"><span class="brand">Cookie compliance report</span>
+  <a href="#overview" data-page="overview">Overview</a>
+  ${perSite.map((s) => { const { u, c } = siteCounts(s); const bad = u + c; return `<a href="#site-${slugOf(s.site)}" data-page="site-${slugOf(s.site)}">${esc(s.site)}${bad ? `<span class="n-bad">${bad}</span>` : ""}</a>`; }).join("\n  ")}
+</nav>
+<div class="wrap">
+  ${overviewPage}
+  ${perSite.map(sitePage).join("")}
   <footer>Observed: independent behavioural classifier (classify-v2 / pass3), confidence-gated · Declared: site CMP ruleset (re-fetched full) · MCP: ${esc(mcp.source || "cookie_classification")} (name corpus, reference only) · mutual-exclusivity from category-rules.json (PECR · ICC · IAB TCF) · "what was sent" boxes: deterministic byte matching against captured request bodies/headers · generated ${new Date().toISOString().slice(0, 10)}.</footer>
-</div></body></html>`;
+</div>
+<script>
+(function () {
+  var pages = Array.prototype.slice.call(document.querySelectorAll(".page"));
+  var tabs = Array.prototype.slice.call(document.querySelectorAll(".nav a[data-page]"));
+  var nav = document.querySelector(".nav");
+  function measureNav() {
+    document.documentElement.style.setProperty("--navh", nav.offsetHeight + "px");
+  }
+  window.addEventListener("resize", measureNav);
+  measureNav();
+  function show() {
+    var id = (location.hash || "#overview").slice(1);
+    if (!document.getElementById(id)) id = "overview";
+    pages.forEach(function (p) { p.hidden = p.id !== id; });
+    tabs.forEach(function (t) { t.classList.toggle("active", t.getAttribute("data-page") === id); });
+    window.scrollTo(0, 0);
+  }
+  window.addEventListener("hashchange", show);
+  show();
+})();
+</script>
+</body></html>`;
 
 writeFileSync(outPath, html);
 console.log(`${roll.cookies} cookies · ${roll.sites} sites -> ${outPath}`);
