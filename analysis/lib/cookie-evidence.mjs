@@ -18,6 +18,8 @@ import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { hostOf, registrableDomain, partyOf } from "./cookie-features.mjs";
+import { characteriseOutbound } from "./outbound-characterise.mjs";
+import { namedParts, identifierNeedles } from "./value-parts.mjs";
 
 const ANALYSIS_DIR = dirname(dirname(fileURLToPath(import.meta.url))); // .../analysis
 const MAX_BUFFER = 512 * 1024 * 1024;
@@ -215,6 +217,8 @@ export const buildEvidence = (graphmlPath, opts = {}) => {
             method: c.method,
             via: c.viaScriptUrl || null,
             round: 0,
+            // The actual argument bytes around the match — the outbound evidence.
+            argSnippet: c.argSnippet || null,
           });
         }
       }
@@ -233,18 +237,27 @@ export const buildEvidence = (graphmlPath, opts = {}) => {
           method: h.method,
           via: h.viaScriptUrl || null,
           round: h.round ?? 1,
+          argSnippet: h.argSnippet || null,
+          matchedValue: h.matchedValue || null,
         });
         if ((h.round ?? 0) > 0) ev.transforms.push(`value transformed before reaching ${host || "network"} (taint round ${h.round})`);
       }
     }
     if (ev.jsExfil.destinations.length > 0) ev.jsExfil.fired = true;
-    // de-dup destinations by host|url|method
+    // de-dup destinations by host|url|method — MERGING, not discarding: the reads-path record
+    // lands first and may lack the argument bytes the flow-path duplicate carries, and dropping
+    // the enriched duplicate would silently lose the outbound evidence.
     {
-      const seen = new Set();
+      const seen = new Map();
       ev.jsExfil.destinations = ev.jsExfil.destinations.filter((d) => {
         const k = `${d.host}|${d.url}|${d.method}`;
-        if (seen.has(k)) return false;
-        seen.add(k);
+        const prev = seen.get(k);
+        if (prev) {
+          if (!prev.argSnippet && d.argSnippet) prev.argSnippet = d.argSnippet;
+          if (!prev.matchedValue && d.matchedValue) prev.matchedValue = d.matchedValue;
+          return false;
+        }
+        seen.set(k, d);
         return true;
       });
     }
@@ -316,16 +329,37 @@ export const buildEvidence = (graphmlPath, opts = {}) => {
     cookies.set(name, ev);
   }
 
+  // Identifier parts shared across the jar (the same UUID stored under several names): a body
+  // hit on a shared part attributes to every cookie holding it, deliberately — this index lets
+  // the per-destination records DISCLOSE that instead of it silently looking like N leaks.
+  const sharedIndex = new Map(); // text -> Set<cookieName>
+  const noteShared = (text, n) => {
+    if (!text || text.length < 12) return;
+    if (!sharedIndex.has(text)) sharedIndex.set(text, new Set());
+    sharedIndex.get(text).add(n);
+  };
+  for (const [name, ev] of cookies) {
+    noteShared(ev.value, name);
+    for (const p of identifierNeedles(namedParts(name, ev.value))) noteShared(p.text, name);
+  }
+
   // --- body exfiltration + redirect-chain features, per cookie ---------------
   for (const [name, ev] of cookies) {
     const finds = bodyScan?.findings?.[name] || [];
-    const out = finds.filter((f) => f.kind === "request");
-    const back = finds.filter((f) => f.kind === "response");
+    // Full-value and part hits are DIFFERENT CLAIMS and are never summed: `hits`/`destinations`/
+    // `encodings` keep their historical full-value-only semantics; part hits are new fields.
+    // (`matchScope` undefined = a record from before part seeding = full.)
+    const out = finds.filter((f) => f.kind === "request" && f.matchScope !== "part");
+    const outPart = finds.filter((f) => f.kind === "request" && f.matchScope === "part");
+    const back = finds.filter((f) => f.kind === "response" && f.matchScope !== "part");
     ev.bodyExfil.assessed = !!bodyScan;
     ev.bodyExfil.hits = out.length;
     ev.bodyExfil.destinations = [...new Set(out.map((f) => hostOf(f.url)).filter(Boolean))]
       .map((h) => ({ host: h, party: partyOf(h, pageRegDomain) }));
     ev.bodyExfil.encodings = [...new Set(out.map((f) => f.encoding).filter(Boolean))];
+    ev.bodyExfil.partHits = outPart.length;
+    ev.bodyExfil.partDestinations = [...new Set(outPart.map((f) => hostOf(f.url)).filter(Boolean))]
+      .map((h) => ({ host: h, party: partyOf(h, pageRegDomain) }));
     ev.bodyInfil.assessed = !!bodyScan;
     ev.bodyInfil.hits = back.length;
     ev.bodyInfil.sources = [...new Set(back.map((f) => hostOf(f.url)).filter(Boolean))].slice(0, 8);
@@ -353,6 +387,20 @@ export const buildEvidence = (graphmlPath, opts = {}) => {
         if (ev.redirect.chains.length >= 3) break;
       }
     }
+
+    // Per-destination characterisation of WHAT actually left — fused from the raw body findings
+    // (not the collapsed counts above), the header/URL hits, the JS sink records, and the
+    // automatic Cookie: header carriage. This is the record that grounds a purpose claim.
+    ev.outbound = characteriseOutbound({
+      name,
+      value: ev.value,
+      pageRegDomain,
+      bodyFindings: finds,
+      headerDestinations: ev.headerExfil.destinations,
+      jsDestinations: ev.jsExfil.destinations,
+      httpTransmission: ev.httpTransmission,
+      sharedIndex,
+    });
   }
 
   return { pageUrl, pageRegDomain, referenceEpochSec, cookies, warnings, inventoryCount: inventory.length,
