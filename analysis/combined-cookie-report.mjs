@@ -64,6 +64,9 @@ for (const site of sites) {
     // The exact source that wrote/read the cookie (extracted for tracking-labelled cookies) — the
     // "where to fix it" layer for developers reading this report.
     row.codeSites = od?.codeSites || null;
+    // Per-destination outbound records: what part of the value left, to whom, with the actual
+    // request bytes and highlight offsets. The "what was sent" evidence boxes render from this.
+    row.outbound = od?.outbound || null;
     // The classifier's own prose: the holistic "why this verdict" (final evidence_summary) plus
     // the three-pass decision trace (name → behaviour → reconciliation), so a surprising label can
     // be understood rather than just seen.
@@ -201,7 +204,11 @@ const graphEvidence = (sg, f) => {
     `${w.script ? `<div class="escript">${esc(w.script)}</div>` : ""}</li>`).concat(eCapNote(sg.writeSites || [])));
 
   g("transmission edges — where the value went", (sg.transmissions || []).slice(0, HOSTCAP).map((t) =>
-    `<li>${eHost(t.host)} <span class="emeth">${esc(t.method || "")}</span> ${eChanTag(t.channel)} ${ePartyTag(t.party)}${eCount(t.count)}</li>`)
+    `<li>${eHost(t.host)} <span class="emeth">${esc(t.method || "")}</span> ${eChanTag(t.channel)} ${ePartyTag(t.party)}` +
+    // Outbound characterisation, when the record carries it (older records render as before).
+    `${t.sentForm ? ` <span class="etag et-form">${esc(t.sentForm)}</span>` : ""}` +
+    `${t.carriesIdentifier === true ? ` <span class="etag et-id">carries identifier</span>` : t.carriesIdentifier === false ? ` <span class="etag et-noid">no identifier</span>` : ""}` +
+    `${eCount(t.count)}</li>`)
     .concat(eCapNote(sg.transmissions || [])));
 
   g("taint path — value read, transformed by JS, then sent", (sg.taintPaths || []).slice(0, HOSTCAP).map((t) =>
@@ -224,7 +231,9 @@ const graphEvidence = (sg, f) => {
     s.valueMutated ? `value mutated across writes (${s.distinctWriteValues ?? "?"} distinct)` : s.refreshedWithSameValue ? "re-set with the same value" : null,
     s.embeddedTimestampAdvanced ? "embedded timestamp advanced" : null,
     s.setterInRedirectChain || s.setterRedirected ? "setter appeared in a redirect chain" : null,
-    s.transformedThenSent ? "value transformed by JS then sent" : null,
+    // "transformed" was a misnomer (any JS-initiated send set it); say what is actually known.
+    s.derivedValueSent ? "value derived by JS, then sent"
+      : (s.jsInitiatedSend ?? s.transformedThenSent) ? "value deliberately sent by page JS" : null,
     s.setterAlsoEndpointForOtherCookies ? `setter also collected ${s.setterAlsoEndpointForOtherCookies} other cookie(s)` : null,
   ].filter(Boolean);
   g("signals", flags.length ? [`<li>${flags.join("; ")}</li>`] : []);
@@ -235,6 +244,72 @@ const graphEvidence = (sg, f) => {
   if (!groups.length) return "";
   return `<details class="gev"><summary>graph evidence</summary>${groups.map(([edge, facts]) =>
     `<div class="gev-g"><span class="gev-h">${esc(edge)}</span><ul>${facts.join("")}</ul></div>`).join("")}</details>`;
+};
+
+// ---- what was sent, per destination -----------------------------------------------------------
+// The evidence box this report exists for: the actual request bytes that carried the cookie value
+// (or a part of it) to each destination, with the matched part highlighted. Answers "which part
+// of this cookie was exfiltrated, and to whom" without anyone re-running the analysis by hand.
+//
+// Highlighting is escape-aware: the excerpt is split at range boundaries, each SEGMENT is
+// HTML-escaped, and only then are the matched segments wrapped in <mark> — escaping after
+// marking would corrupt offsets and print literal tags.
+const markExcerpt = (excerpt, ranges) => {
+  const ex = String(excerpt ?? "");
+  if (!ex) return "";
+  // sort + merge overlapping ranges, clip to the excerpt
+  const merged = [];
+  for (const [s, e] of (ranges || []).map(([s, e]) => [Math.max(0, s), Math.min(e, ex.length)])
+    .filter(([s, e]) => e > s).sort((a, b) => a[0] - b[0])) {
+    const last = merged[merged.length - 1];
+    if (last && s <= last[1]) last[1] = Math.max(last[1], e);
+    else merged.push([s, e]);
+  }
+  let html = "", pos = 0;
+  for (const [s, e] of merged) {
+    html += esc(ex.slice(pos, s)) + `<mark class="ob-mark">${esc(ex.slice(s, e))}</mark>`;
+    pos = e;
+  }
+  html += esc(ex.slice(pos));
+  return html;
+};
+
+const FORM_LABEL = { raw: "raw value", "re-encoded": "re-encoded value", fragment: "value fragment", derived: "derived value" };
+const obBadge = (o) => {
+  if (o.carriesIdentifier === true) {
+    return `<span class="ob-badge ${o.party === "third" ? "ob-bad" : "ob-warn"}">identifier ${o.party === "third" ? "→ 3rd party" : "sent"}</span>`;
+  }
+  if (o.carriesIdentifier === false) return `<span class="ob-badge ob-ok">no identifier in what was sent</span>`;
+  return `<span class="ob-badge ob-unk">identifier: unknown</span>`;
+};
+const obBox = (o) => {
+  const idParts = (o.matchedParts || []).filter((p) => p.isIdentifier);
+  const partsLine = idParts.length
+    ? `<div class="ob-parts">identifier part(s) in the request: ${idParts.map((p) => `<code>${esc(p.key)}</code> <span class="ob-kind">${esc(p.kind)}</span>`).join(", ")}</div>`
+    : o.coverage === "full-value" ? `<div class="ob-parts muted">entire stored value left${o.valueSnapshot === "earlier" ? " (an earlier snapshot of it)" : ""}; no identifier-grade part recognised inside it</div>` : "";
+  const shared = o.sharedWithCookies?.length
+    ? `<div class="ob-shared">same identifier also stored in: ${o.sharedWithCookies.map((n) => `<code>${esc(n)}</code>`).join(", ")}</div>` : "";
+  const excerpt = o.excerpt
+    ? `<pre class="ob-excerpt">${markExcerpt(o.excerpt, o.matchRanges)}</pre>`
+    : `<div class="ob-noexcerpt">sent via the automatic <code>Cookie:</code> request header — the browser attaches the whole cookie; header bytes are not captured</div>`;
+  return `<div class="ob-box ${o.carriesIdentifier === true && o.party === "third" ? "ob-hot" : ""}">
+    <div class="ob-hd">
+      <span class="ob-host">${esc(o.host)}</span>${o.url ? `<span class="ob-path">${esc(String(o.url).replace(/^https?:\/\/[^/]+/, ""))}</span>` : ""}
+      ${ePartyTag(o.party)} ${(o.channels || []).map((c) => eChanTag(c === "js-body" || c === "js-url" ? "js-initiated" : c)).join(" ")}
+      <span class="etag et-form">${esc(FORM_LABEL[o.sentForm] || o.sentForm)}</span>
+      ${o.valueSnapshot === "earlier" ? `<span class="etag et-snap" title="The bytes match an earlier write of this cookie, not its final value — its stable identifier parts are unchanged.">earlier snapshot</span>` : ""}
+      ${obBadge(o)}
+    </div>
+    ${partsLine}${shared}${excerpt}
+  </div>`;
+};
+const outboundEvidence = (outbound) => {
+  if (!outbound?.length) return "";
+  // Third-party identifier carriage first — that is the finding; benign propagation after.
+  const rank = (o) => (o.carriesIdentifier === true ? 2 : o.carriesIdentifier === "unknown" ? 1 : 0) + (o.party === "third" ? 4 : 0);
+  const rows = outbound.slice().sort((a, b) => rank(b) - rank(a)).slice(0, 10);
+  const hot = rows.some((o) => o.carriesIdentifier === true && o.party === "third");
+  return `<details class="gev ob"${hot ? " open" : ""}><summary>what was sent — per destination</summary>${rows.map(obBox).join("")}</details>`;
 };
 
 // The specific SOURCE that touched the cookie — the exact script + line that WROTE or READ it, with
@@ -262,14 +337,28 @@ const codeSite = (s, what) => `<div class="cs-site">` +
   codeExcerpt(s) + codeStack(s.stack) + `</div>`;
 // A SEND is where the value was read and put into a request — the exfiltration site. It leads with the
 // DESTINATION (that is the finding); the script:line shows the code that did it.
-const sendSite = (s) => `<div class="cs-site cs-sendsite">` +
+const sendSite = (s, obByHost) => {
+  // Join the outbound characterisation by destination host, so the send site states WHAT it sent.
+  let sentLine = "";
+  try {
+    const o = obByHost?.get(new URL(s.destUrl).hostname);
+    if (o) {
+      const idParts = (o.matchedParts || []).filter((p) => p.isIdentifier).map((p) => p.key);
+      sentLine = `<div class="cs-sent">sent: <b>${esc(FORM_LABEL[o.sentForm] || o.sentForm)}</b>` +
+        (o.carriesIdentifier === true ? ` · carries identifier${idParts.length ? ` (${esc(idParts.join(", "))})` : ""}`
+          : o.carriesIdentifier === false ? " · no identifier in the bytes" : " · identifier unknown") +
+        ` — see <i>what was sent</i> above</div>`;
+    }
+  } catch { /* unparsable destUrl */ }
+  return `<div class="cs-site cs-sendsite">` +
   `<div class="cs-hd"><span class="cs-what cs-sends">sends&nbsp;&rarr;</span> ` +
   `<span class="cs-dest">${esc(s.destUrl ? shortUrl(s.destUrl) : "(request)")}</span> ` +
-  `<span class="cs-method">${esc(s.method || "")}</span></div>` +
+  `<span class="cs-method">${esc(s.method || "")}</span></div>` + sentLine +
   `<div class="cs-hd cs-sub"><span class="cs-from">from</span> ` +
   `<a class="cs-url" href="${escAttr(s.scriptUrl)}" title="${escAttr(s.scriptUrl)}" target="_blank" rel="noopener">${esc(shortUrl(s.scriptUrl))}</a>` +
   `<span class="cs-loc">:${s.line ?? "?"}:${s.col ?? "?"}</span>${s.inline ? ` <span class="cs-inline">inline</span>` : ""}</div>` +
   codeExcerpt(s) + codeStack(s.stack) + `</div>`;
+};
 // An INFERRED read site — the cookie name was recovered by an LLM reading the code at a jar read, not
 // from a structural graph edge. Styled distinctly (dashed) and labelled "inferred" so it is never
 // mistaken for observed truth.
@@ -279,14 +368,15 @@ const readSite = (s) => `<div class="cs-site cs-readsite">` +
   `<span class="cs-loc">:${s.line ?? "?"}:${s.col ?? "?"}</span>${s.inline ? ` <span class="cs-inline">inline</span>` : ""} ` +
   `<span class="cs-inferred" title="Recovered by reading the code at the read site — inference, not a graph edge.">inferred${s.confidence ? ` · ${esc(s.confidence)}` : ""}</span></div>` +
   codeExcerpt(s) + (s.reasoning ? `<div class="cs-reason">${esc(s.reasoning)}</div>` : "") + `</div>`;
-const codeEvidence = (cs) => {
+const codeEvidence = (cs, outbound) => {
   if (!cs) return "";
+  const obByHost = new Map((outbound || []).map((o) => [o.host, o]));
   const w = (cs.writes || []).slice(0, 4).map((s) => codeSite(s, "writes"));
   const sends = (cs.sends || []).filter((s) => s.isNetworkSink && s.destUrl);
   // Dedup sends by destination + line so a wrapped fetch does not repeat.
   const seen = new Set();
   const sh = sends.filter((s) => { const k = `${s.destUrl}|${s.scriptUrl}|${s.line}`; if (seen.has(k)) return false; seen.add(k); return true; })
-    .slice(0, 4).map(sendSite);
+    .slice(0, 4).map((s) => sendSite(s, obByHost));
   const resolved = cs.resolvedReads || [];
   const namedReads = resolved.filter((s) => s.scope === "named" && !s.jarWide);
   const rseen = new Set();
@@ -321,13 +411,15 @@ const classifierReasoning = (p, action) => {
 
 const rowHtml = (r) => {
   const m = STATUS_META[r.status];
-  // Observed: per-label reasoning, the holistic "why", the 3-pass trace, then the graph facts.
+  // Observed: per-label reasoning, the holistic "why", the 3-pass trace, WHAT WAS SENT (the
+  // per-destination request bytes with the matched part highlighted), then graph + code facts.
   const obs = labelCell(r.observedIcc, "reasoning",
     r.observedConf ? `<span class="conf">${esc(r.observedConf)}</span>` : "") +
     (r.observedTcf.length ? `<div class="grp">TCF ${esc(r.observedTcf.slice(0, 4).join(" "))}</div>` : "") +
     classifierReasoning(r.passes, r.p3) +
+    outboundEvidence(r.outbound) +
     graphEvidence(r.subgraph, r.features) +
-    codeEvidence(r.codeSites);
+    codeEvidence(r.codeSites, r.outbound);
   const declChips = r.declaredCats.length
     ? r.declaredCats.map((l) => chip(l, cls(l), r.declaredDesc)).join(" ")
     : `<span class="muted">not declared</span>`;
@@ -339,9 +431,15 @@ const rowHtml = (r) => {
     <td>${obs}</td>
     <td>${decl}</td>
     <td>${mcpCell}</td>
-    <td><span class="verdict ${m.cls}">${esc(m.label)}</span>${r.detail ? `<div class="detail">${esc(r.detail)}</div>` : ""}</td>
+    <td><span class="verdict ${m.cls}">${esc(m.label)}</span>${r.detail ? `<div class="detail">${esc(r.detail)}</div>` : ""}` +
+    // Deterministic outbound facts — computed from the request bytes, never LLM prose, and
+    // labelled as such so the two provenances stay visibly distinct.
+    `${(r.outboundFacts || []).length ? `<div class="ob-facts"><span class="ob-facts-h">observed on the wire:</span> ${r.outboundFacts.map(esc).join("; ")}</div>` : ""}</td>
   </tr>`;
 };
+
+// One PAGE per site inside a single HTML file: sections toggled by a hash router, so the report
+// stays one self-contained artifact while each site reads as its own page.
 
 const siteSection = (s) => {
   const u = s.rows.filter((r) => r.status === "mismatch-under-declared").length;
@@ -455,7 +553,7 @@ footer{margin-top:3rem;padding-top:1.5rem;border-top:1px solid var(--line);color
     <div class="tile"><div class="v">${roll.mcpScorable ? Math.round(100 * roll.mcpAgreesObserved / roll.mcpScorable) + "%" : "—"}</div><div class="k">MCP ↔ ours agree</div></div>
   </div>
 
-  <div class="note"><b>Three columns, three provenances.</b> <b>Observed</b> is ours, from behaviour, and never saw the other two. <b>Declared</b> is the site's own CMP claim. <b>MCP</b> is a name-corpus classifier shown for reference only — it is <em>name-keyed</em>, so it is identical for a given cookie name across every site, and it is never the yardstick. The <b>verdict</b> is strictly declared-vs-observed; a Strictly-Necessary declaration is refuted when we observe tracking, and we abstain ("not assessable") where our own confidence is low.</div>
+  <div class="note"><b>Three columns, three provenances.</b> <b>Observed</b> is ours, from behaviour, and never saw the other two. <b>Declared</b> is the site's own CMP claim. <b>MCP</b> is a name-corpus classifier shown for reference only — it is <em>name-keyed</em>, so it is identical for a given cookie name across every site, and it is never the yardstick. The <b>verdict</b> is strictly declared-vs-observed; a Strictly-Necessary declaration is refuted when we observe tracking, and we abstain ("not assessable") where our own confidence is low. Each cookie's <b>what was sent</b> box shows the actual request bytes that carried its value, with the matched part highlighted — computed deterministically from the crawl's request bodies and headers, never by a model.</div>
 
   <h2>How pass 3 reconciled identity vs behaviour</h2>
   <div class="sitesum">The classifier runs three passes: <b>A</b> infers purpose from the cookie name, <b>B</b> re-decides from behaviour alone (name-blind), <b>C</b> reconciles them into the final label. Pass 3 acted on <b>${roll.p3TookA + roll.p3TookB + roll.p3Blend}</b> of ${roll.cookies} cookies. Each row's Observed cell carries a <b>pass 3</b> badge and the full three-pass trace.</div>
@@ -468,7 +566,7 @@ footer{margin-top:3rem;padding-top:1.5rem;border-top:1px solid var(--line);color
 
   ${perSite.map(siteSection).join("")}
 
-  <footer>Observed: independent behavioural classifier (classify-v2 / pass3), confidence-gated · Declared: site CMP ruleset (re-fetched full) · MCP: ${esc(mcp.source || "cookie_classification")} (name corpus, reference only) · mutual-exclusivity from category-rules.json (PECR · ICC · IAB TCF) · generated ${new Date().toISOString().slice(0, 10)}.</footer>
+  <footer>Observed: independent behavioural classifier (classify-v2 / pass3), confidence-gated · Declared: site CMP ruleset (re-fetched full) · MCP: ${esc(mcp.source || "cookie_classification")} (name corpus, reference only) · mutual-exclusivity from category-rules.json (PECR · ICC · IAB TCF) · "what was sent" boxes: deterministic byte matching against captured request bodies/headers · generated ${new Date().toISOString().slice(0, 10)}.</footer>
 </div></body></html>`;
 
 writeFileSync(outPath, html);
