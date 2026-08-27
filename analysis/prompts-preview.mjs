@@ -50,6 +50,12 @@ const PASSES = [
     role: "The final label. Identity is authoritative for semantic categories (security / consent / infra); behaviour may ADD a purpose only on a deliberate transmission — a third-party destination or a JS-initiated send, never a value merely auto-attached to a same-party request; behaviour may not REMOVE a purpose on a single load.",
   },
   {
+    id: "R", tag: "Read resolver", title: "Which cookie a document.cookie read wanted",
+    file: "analysis/resolve-cookie-reads.mjs", prompt: grab("analysis/resolve-cookie-reads.mjs", "SYSTEM"),
+    sees: "The JavaScript at a document.cookie read site, plus the call stack above it with each frame's own source. No cookie name is supplied — the model recovers it from the code (an inline literal, or a getCookie('name') argument up the stack).",
+    role: "Post-crawl enrichment, not a classification pass. PageGraph records reads against the whole cookie jar (document.cookie returns everything), so this reads the code to name which cookie(s) a read extracted — returning named / all / unknown. Inference, labelled as such and never mixed into the graph's structural reads.",
+  },
+  {
     id: "H", tag: "Legacy", title: "Single-pass head (classify-cookies.mjs)",
     file: "analysis/lib/llm-head.mjs", prompt: HEAD_INSTRUCTIONS,
     sees: "The compact evidence payload (party, set channel, reads, destinations, persistence, entropy) plus the deterministic rule prior.",
