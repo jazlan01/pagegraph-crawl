@@ -57,9 +57,12 @@ Your job is to reconcile them. The two sources have DIFFERENT authority, and thi
 
 1. IDENTITY IS AUTHORITATIVE FOR SEMANTIC CATEGORIES. If the name and domain identify a security / bot-defence / WAF token, a consent record, an authentication or session cookie, or site infrastructure (load balancing, geo/store selection, locale), then it is Necessary — regardless of how active it looks. These cookies are indistinguishable from trackers behaviourally: a bot-management token is a high-entropy identifier, rewritten many times per load, sent on every request. That activity is its function, not evidence of tracking. Labelling a firewall cookie Advertising or Analytics is indefensible.
 
-2. BEHAVIOUR MAY ADD A PURPOSE ONLY ON OBSERVED THIRD-PARTY TRANSMISSION. You may add a purpose that identity did not suggest ONLY when the feature vector shows the value actually left to a third party — a non-empty thirdPartyExfilDestinations, a bodyExfil to a third-party host, or a transformedThenSent to one. Name the host you are relying on in your reasoning.
+2. BEHAVIOUR MAY ADD A PURPOSE ONLY ON OBSERVED THIRD-PARTY TRANSMISSION, JUDGED PER DESTINATION. \`outboundByDestination\` states, for each host the value reached, WHAT actually left: \`sentForm\` ("raw" = the stored value verbatim; "re-encoded" = the same value mechanically re-encoded; "fragment" = a part of the value travelling without the rest; "derived" = JS computed something from it before sending), \`carriesIdentifier\` (whether the outbound bytes included a stable identifier-grade token — a UUID, a long digest, a high-entropy id; false means only non-identifying parts such as flags, timestamps or recorded choices left; "unknown" means not determinable — treat it as weaker than true, never as true), \`matchedParts\` (the named value parts that travelled, e.g. "consentId (UUID)"), \`valueSnapshot\` ("earlier" = an earlier snapshot of the value, which still identifies if its identifier parts are stable), and an \`excerpt\` of the actual request bytes around the match. Judge each destination on ITS record, and name the host AND what left (the matched part or form) in your reasoning.
+   * ADDING a tracking purpose (Analytics/Advertising) requires an identifier-carrying send (carriesIdentifier=true, any sentForm) to a host whose role is measurement or advertising. A raw value carrying a persistent identifier deliberately placed into an analytics vendor's ingestion endpoint IS grounds to add Analytics even for a consent or infrastructure cookie — the label follows what the bytes did, not what the cookie is named.
+   * PROPAGATION TO THE OWNING VENDOR for its stated function is NOT new tracking: a consent record (consent id included) posted to the CMP's own consent-receipt endpoint, or a bot-defence token returning to its own vendor's endpoint, is purpose-consistent operation. Do not add a purpose for it; you may note it.
+   * A js-initiated send with carriesIdentifier=false is STATE PROPAGATION, not identification — it does not add a purpose.
    Activity alone is NOT sufficient and never has been: write churn, value rotation, high entropy, long life and being carried on many requests are all normal for security infrastructure. Adding Analytics to a bot-defence token because it was rewritten eleven times is the single most damaging error this system makes, and rule 1 outranks this rule when they conflict.
-   The TRANSMISSION CHANNEL decides whether a transmission is evidence. The browser attaches a cookie to the Cookie: header of matching requests automatically; a value carried to a first-party or same-organisation host (e.g. a measurement subdomain of the same company) purely by that automatic header is NOT deliberate exfiltration and does NOT add a purpose — every cookie on the domain rides those requests. To ADD a purpose you need EITHER a value the page's JS deliberately placed into a request (a js-initiated send / transformedThenSent / bodyExfil) OR carriage to a genuinely unrelated third-party ad or analytics network. Do not add Analytics to a security/infrastructure token because its value appeared, via the automatic header, at the site's own analytics endpoint.
+   The TRANSMISSION CHANNEL decides whether a transmission is evidence. The browser attaches a cookie to the Cookie: header of matching requests automatically; a value carried to a first-party or same-organisation host (e.g. a measurement subdomain of the same company) purely by that automatic header is NOT deliberate exfiltration and does NOT add a purpose — every cookie on the domain rides those requests. To ADD a purpose you need EITHER a value the page's JS deliberately placed into a request (a js-initiated send / bodyExfil — see the per-destination records) OR carriage to a genuinely unrelated third-party ad or analytics network. Do not add Analytics to a security/infrastructure token because its value appeared, via the automatic header, at the site's own analytics endpoint.
    A cookie whose name reads "analytics" but whose value demonstrably reached an ad network is doing both — that is the case a name corpus structurally cannot see, and it must survive into your answer.
 
 3. BEHAVIOUR MAY NOT REMOVE A PURPOSE. One page load is a small window. "Nothing was observed" is not evidence that a cookie does nothing — modern analytics keeps state client-side and transmits separately, and server-side measurement is invisible from the browser entirely. Where identity indicates a purpose and behaviour simply did not exercise it, KEEP the label and lower its confidence. Do not silently drop it, and never substitute Necessary for "nothing seen" — Necessary is a positive claim that the cookie is strictly required, not a residual bin.
@@ -102,7 +105,14 @@ const refreshFeatures = (site) => {
     const g = readdirSync(dir).find((x) => isGraphPath(x));
     if (g) {
       log(`  re-deriving features for ${site}`);
-      F = buildGraphFeatures(buildEvidence(join(dir, g), { log: () => {} }));
+      const evd = buildEvidence(join(dir, g), { log: () => {} });
+      // Refresh d.outbound alongside the features: the per-destination records are what ground
+      // rule 2, and a pass over pre-characteriser outputs would otherwise get the enums with no
+      // evidence behind them.
+      F = {
+        features: buildGraphFeatures(evd),
+        outbound: new Map([...evd.cookies].map(([n, e]) => [n, e.outbound || []])),
+      };
     }
   } catch (e) { log(`  ! could not refresh ${site}: ${String(e.message).split("\n")[0]}`); }
   refreshed.set(site, F);
@@ -126,7 +136,10 @@ const same = (a, b) => a.size === b.size && [...a].every((x) => b.has(x));
 const results = await pool(jobs, concurrency, async (job) => {
   const d = JSON.parse(readFileSync(job.file, "utf8"));
   const F = refreshFeatures(job.site);
-  if (F?.has(d.cookie)) d.features = F.get(d.cookie);
+  if (F?.features?.has(d.cookie)) {
+    d.features = F.features.get(d.cookie);
+    d.outbound = F.outbound.get(d.cookie) ?? d.outbound ?? [];
+  }
 
   // COMPACT PAYLOAD. Per-cookie cost matters: this runs once per cookie per site, and the naive
   // version measured ~1,094 tokens each (~301k for 275 cookies) — mostly the setBy/networkChain
@@ -140,19 +153,49 @@ const results = await pool(jobs, concurrency, async (job) => {
   const nz = (o) => Object.fromEntries(Object.entries(o).filter(([, v]) =>
     v !== false && v !== 0 && v !== null && !(Array.isArray(v) && !v.length)));
 
+  // Per-destination outbound records: WHAT left, to WHOM, in what form, with the actual request
+  // bytes around the match. This is rule 2's evidence. Excerpts are verbatim but bounded — the
+  // window is centred on the first highlighted match so the identifier (or its absence) is
+  // inside the 160 chars the model sees. `carriesIdentifier` is kept even when false — false is
+  // the load-bearing signal ("nothing identifying left"), so nz() must not strip it.
+  const excerptFor = (o) => {
+    if (!o.excerpt) return null;
+    const [s] = (o.matchRanges && o.matchRanges[0]) || [0];
+    const start = Math.max(0, Math.min(s - 40, o.excerpt.length - 160));
+    return o.excerpt.slice(start, start + 160);
+  };
+  const outboundByDestination = (d.outbound || []).slice(0, 12).map((o) => ({
+    host: o.host,
+    party: o.party,
+    channels: o.channels,
+    ...(o.url ? { endpointPath: String(o.url).replace(/^https?:\/\/[^/]+/, "") } : {}),
+    sentForm: o.sentForm,
+    ...(o.valueSnapshot ? { valueSnapshot: o.valueSnapshot } : {}),
+    carriesIdentifier: o.carriesIdentifier,
+    ...(o.identifierKinds?.length ? { identifierKinds: o.identifierKinds } : {}),
+    ...((o.matchedParts || []).some((p) => p.isIdentifier)
+      ? { matchedParts: o.matchedParts.filter((p) => p.isIdentifier).map((p) => `${p.key} (${p.kind})`) }
+      : {}),
+    coverage: o.coverage,
+    ...(excerptFor(o) ? { excerpt: excerptFor(o) } : {}),
+    ...(o.sharedWithCookies?.length ? { sameIdentifierAlsoStoredIn: o.sharedWithCookies } : {}),
+  }));
+
   const c = await runHead(SYSTEM_C, {
     identity: { cookie: d.cookie, domain: d.domain, valueLength: f.valueLength },
     setBy: nz({ scripts: f.settingScripts, hosts: f.setterHosts, channel: f.setChannels,
                 party: f.setterParties, redirected: f.setterRedirected }),
     networkChain: nz({ redirectChain: f.redirectChain, thirdPartyExfil: f.thirdPartyExfilDestinations,
                        exfil: f.exfilDestinations, infilFrom: f.infilSourceHosts }),
+    ...(outboundByDestination.length ? { outboundByDestination } : {}),
     behaviour: nz({
       writes: f.writeCount, deletes: f.deleteCount, distinctValues: f.distinctWriteValues,
       valueMutated: f.valueMutated, refreshedSameValue: f.refreshedWithSameValue,
       clockAdvanced: f.embeddedTimestampAdvanced, httpSets: f.httpSetCount,
       carriedOnRequests: f.cookieHeaderRequests, urlParamExfil: f.urlParamExfil,
       headerExfil: f.requestHeaderExfil, bodyExfil: f.bodyExfil, bodyInfil: f.bodyInfil,
-      transformedThenSent: f.transformedThenSent, writers: f.writerCount,
+      jsInitiatedSend: f.jsInitiatedSend ?? f.transformedThenSent,
+      derivedValueSent: f.derivedValueSent, writers: f.writerCount,
       maxCookiesPerWriter: f.maxCookiesPerWriter, setterCollectsOtherCookies: f.setterAlsoEndpointForOtherCookies,
       readerShareOfPage: f.readerShareOfPage, persistent: f.persistent, httpOnly: f.httpOnly,
       party: f.party,
